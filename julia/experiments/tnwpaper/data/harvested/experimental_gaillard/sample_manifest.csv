@@ -1,0 +1,2 @@
+dataset,sample_id,NK_plan,phi_plan,NK_expt,phi_expt,hK_star,fe_model,has_c2d2,has_constant,n_expt_points,n_model_points_c2d2
+gaillard,G1,,,,,,,true,false,21,18

@@ -1,0 +1,5 @@
+dataset,sample_id,NK_plan,phi_plan,NK_expt,phi_expt,hK_star,fe_model,has_c2d2,has_constant,n_expt_points,n_model_points_c2d2
+calabrese,VC1,,,,,,,true,false,3,18
+calabrese,VC2,,,,,,,true,false,3,18
+calabrese,VC3,,,,,,,true,false,3,18
+calabrese,VC4,,,,,,,true,false,3,18

@@ -1,0 +1,4 @@
+dataset,sample_id,NK_plan,phi_plan,NK_expt,phi_expt,hK_star,fe_model,has_c2d2,has_constant,n_expt_points,n_model_points_c2d2
+anna,A1,,,,,,,true,false,1,18
+anna,A2,,,,,,,true,false,1,20
+anna,A3,,,,,,,true,false,1,20

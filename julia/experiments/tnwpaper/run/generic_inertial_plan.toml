@@ -1,0 +1,112 @@
+# Generic-behaviour plan — INERTIO-CAPILLARY regime (two-limit, TnW v4).
+# Counterpart of generic_validation_plan.toml S03/S04 (viscous): same NK=3000,
+# hsK=0.05, phi family and De grid, but flow.kind="caber_inertial" with
+# Oh=0.005 and X_R=0.5115 (Gaillard A=0.47).  De values are interpreted as
+# De_R (Rayleigh-time Deborah).  Used for the two sweep-level checks:
+#   - regime-invariant dilute FE plateau Wi_e ∝ phi^{-4/3}
+#   - regime-dependent post-corner master slope (8/9 inertial vs 4/3 viscous)
+# Ko, 2026-06-11.
+
+[production]
+out_root = "julia/experiments/tnwpaper/outputs/generic_inertial"
+
+[templates]
+caber = "experiments/tnwpaper/inputs/tnwpaper_caber_sweep_de.toml"
+
+# ── S05 : inertial caber De_R-sweep, constant drag, per-phi ──────────────────
+[[sweeps]]
+kind = "caber_De"
+folder = "S05_caber_inertial_sweep_De_NK_3000_hsK_0p05_phi_0p01_drag_constant"
+template = "caber"
+set = [
+  ["polymer.NK", 3000], ["polymer.hK_star", 0.05],
+  ["model.fe_model", "fenepm"], ["model.drag_model", "constant"],
+  ["concentration.phi", 0.01],
+  ["flow.kind", "caber_inertial"], ["flow.Oh", 0.005], ["flow.X_R", 0.5115],
+  ["flow.De_values", [0.01, 0.03, 0.1, 0.3, 1.0, 3.0, 10.0, 30.0, 100.0]],
+]
+
+[[sweeps]]
+kind = "caber_De"
+folder = "S05_caber_inertial_sweep_De_NK_3000_hsK_0p05_phi_0p1_drag_constant"
+template = "caber"
+set = [
+  ["polymer.NK", 3000], ["polymer.hK_star", 0.05],
+  ["model.fe_model", "fenepm"], ["model.drag_model", "constant"],
+  ["concentration.phi", 0.1],
+  ["flow.kind", "caber_inertial"], ["flow.Oh", 0.005], ["flow.X_R", 0.5115],
+  ["flow.De_values", [0.01, 0.03, 0.1, 0.3, 1.0, 3.0, 10.0, 30.0, 100.0]],
+]
+
+[[sweeps]]
+kind = "caber_De"
+folder = "S05_caber_inertial_sweep_De_NK_3000_hsK_0p05_phi_0p5_drag_constant"
+template = "caber"
+set = [
+  ["polymer.NK", 3000], ["polymer.hK_star", 0.05],
+  ["model.fe_model", "fenepm"], ["model.drag_model", "constant"],
+  ["concentration.phi", 0.5],
+  ["flow.kind", "caber_inertial"], ["flow.Oh", 0.005], ["flow.X_R", 0.5115],
+  ["flow.De_values", [0.01, 0.03, 0.1, 0.3, 1.0, 3.0, 10.0, 30.0, 100.0]],
+]
+
+[[sweeps]]
+kind = "caber_De"
+folder = "S05_caber_inertial_sweep_De_NK_3000_hsK_0p05_phi_1_drag_constant"
+template = "caber"
+set = [
+  ["polymer.NK", 3000], ["polymer.hK_star", 0.05],
+  ["model.fe_model", "fenepm"], ["model.drag_model", "constant"],
+  ["concentration.phi", 1.0],
+  ["flow.kind", "caber_inertial"], ["flow.Oh", 0.005], ["flow.X_R", 0.5115],
+  ["flow.De_values", [0.01, 0.03, 0.1, 0.3, 1.0, 3.0, 10.0, 30.0, 100.0]],
+]
+
+# ── S06 : inertial caber De_R-sweep, c2d2 drag, per-phi ──────────────────────
+[[sweeps]]
+kind = "caber_De"
+folder = "S06_caber_inertial_sweep_De_NK_3000_hsK_0p05_phi_0p01_drag_c2d2"
+template = "caber"
+set = [
+  ["polymer.NK", 3000], ["polymer.hK_star", 0.05],
+  ["model.fe_model", "fenepm"], ["model.drag_model", "c2d2"],
+  ["concentration.phi", 0.01],
+  ["flow.kind", "caber_inertial"], ["flow.Oh", 0.005], ["flow.X_R", 0.5115],
+  ["flow.De_values", [0.01, 0.03, 0.1, 0.3, 1.0, 3.0, 10.0, 30.0, 100.0]],
+]
+
+[[sweeps]]
+kind = "caber_De"
+folder = "S06_caber_inertial_sweep_De_NK_3000_hsK_0p05_phi_0p1_drag_c2d2"
+template = "caber"
+set = [
+  ["polymer.NK", 3000], ["polymer.hK_star", 0.05],
+  ["model.fe_model", "fenepm"], ["model.drag_model", "c2d2"],
+  ["concentration.phi", 0.1],
+  ["flow.kind", "caber_inertial"], ["flow.Oh", 0.005], ["flow.X_R", 0.5115],
+  ["flow.De_values", [0.01, 0.03, 0.1, 0.3, 1.0, 3.0, 10.0, 30.0, 100.0]],
+]
+
+[[sweeps]]
+kind = "caber_De"
+folder = "S06_caber_inertial_sweep_De_NK_3000_hsK_0p05_phi_0p5_drag_c2d2"
+template = "caber"
+set = [
+  ["polymer.NK", 3000], ["polymer.hK_star", 0.05],
+  ["model.fe_model", "fenepm"], ["model.drag_model", "c2d2"],
+  ["concentration.phi", 0.5],
+  ["flow.kind", "caber_inertial"], ["flow.Oh", 0.005], ["flow.X_R", 0.5115],
+  ["flow.De_values", [0.01, 0.03, 0.1, 0.3, 1.0, 3.0, 10.0, 30.0, 100.0]],
+]
+
+[[sweeps]]
+kind = "caber_De"
+folder = "S06_caber_inertial_sweep_De_NK_3000_hsK_0p05_phi_1_drag_c2d2"
+template = "caber"
+set = [
+  ["polymer.NK", 3000], ["polymer.hK_star", 0.05],
+  ["model.fe_model", "fenepm"], ["model.drag_model", "c2d2"],
+  ["concentration.phi", 1.0],
+  ["flow.kind", "caber_inertial"], ["flow.Oh", 0.005], ["flow.X_R", 0.5115],
+  ["flow.De_values", [0.01, 0.03, 0.1, 0.3, 1.0, 3.0, 10.0, 30.0, 100.0]],
+]

@@ -1,0 +1,126 @@
+# Generic-behaviour validation plan (Fig 2 + Fig 4 baseline)
+# Mirrors MATLAB matlab/experiments/tnwpaper/outputs/generic_features S01-S04
+# (NK=3000, hsK=0.05). Used to validate the Julia runner against the MATLAB
+# reference at matched (phi, De) points. Aru, 2026-06-08.
+
+[production]
+out_root = "julia/experiments/tnwpaper/outputs/generic_validation"
+
+[templates]
+styext = "experiments/tnwpaper/inputs/tnwpaper_styext_sweep_phi.toml"
+caber  = "experiments/tnwpaper/inputs/tnwpaper_caber_sweep_de.toml"
+
+# ── S01 / S02 : styext phi-family (Fig 2 Pipkin) ──────────────────────────────
+[[sweeps]]
+kind = "styext_phi"
+folder = "S01_styext_sweep_phi_NK_3000_hsK_0p05_drag_constant"
+template = "styext"
+set = [
+  ["polymer.NK", 3000],
+  ["polymer.hK_star", 0.05],
+  ["model.fe_model", "fenepm"],
+  ["model.drag_model", "constant"],
+  ["concentration.phi_values", [0.01, 0.1, 0.5, 1.0]],
+]
+
+[[sweeps]]
+kind = "styext_phi"
+folder = "S02_styext_sweep_phi_NK_3000_hsK_0p05_drag_c2d2"
+template = "styext"
+set = [
+  ["polymer.NK", 3000],
+  ["polymer.hK_star", 0.05],
+  ["model.fe_model", "fenepm"],
+  ["model.drag_model", "c2d2"],
+  ["concentration.phi_values", [0.01, 0.1, 0.5, 1.0]],
+]
+
+# ── S03 : caber De-sweep, constant drag, per-phi (Fig 4 plateau) ──────────────
+[[sweeps]]
+kind = "caber_De"
+folder = "S03_caber_sweep_De_NK_3000_hsK_0p05_phi_0p01_drag_constant"
+template = "caber"
+set = [
+  ["polymer.NK", 3000], ["polymer.hK_star", 0.05],
+  ["model.fe_model", "fenepm"], ["model.drag_model", "constant"],
+  ["concentration.phi", 0.01],
+  ["flow.De_values", [0.01, 0.03, 0.1, 0.3, 1.0, 3.0, 10.0, 30.0, 100.0]],
+]
+
+[[sweeps]]
+kind = "caber_De"
+folder = "S03_caber_sweep_De_NK_3000_hsK_0p05_phi_0p1_drag_constant"
+template = "caber"
+set = [
+  ["polymer.NK", 3000], ["polymer.hK_star", 0.05],
+  ["model.fe_model", "fenepm"], ["model.drag_model", "constant"],
+  ["concentration.phi", 0.1],
+  ["flow.De_values", [0.01, 0.03, 0.1, 0.3, 1.0, 3.0, 10.0, 30.0, 100.0]],
+]
+
+[[sweeps]]
+kind = "caber_De"
+folder = "S03_caber_sweep_De_NK_3000_hsK_0p05_phi_0p5_drag_constant"
+template = "caber"
+set = [
+  ["polymer.NK", 3000], ["polymer.hK_star", 0.05],
+  ["model.fe_model", "fenepm"], ["model.drag_model", "constant"],
+  ["concentration.phi", 0.5],
+  ["flow.De_values", [0.01, 0.03, 0.1, 0.3, 1.0, 3.0, 10.0, 30.0, 100.0]],
+]
+
+[[sweeps]]
+kind = "caber_De"
+folder = "S03_caber_sweep_De_NK_3000_hsK_0p05_phi_1_drag_constant"
+template = "caber"
+set = [
+  ["polymer.NK", 3000], ["polymer.hK_star", 0.05],
+  ["model.fe_model", "fenepm"], ["model.drag_model", "constant"],
+  ["concentration.phi", 1.0],
+  ["flow.De_values", [0.01, 0.03, 0.1, 0.3, 1.0, 3.0, 10.0, 30.0, 100.0]],
+]
+
+# ── S04 : caber De-sweep, c2d2 drag, per-phi ─────────────────────────────────
+[[sweeps]]
+kind = "caber_De"
+folder = "S04_caber_sweep_De_NK_3000_hsK_0p05_phi_0p01_drag_c2d2"
+template = "caber"
+set = [
+  ["polymer.NK", 3000], ["polymer.hK_star", 0.05],
+  ["model.fe_model", "fenepm"], ["model.drag_model", "c2d2"],
+  ["concentration.phi", 0.01],
+  ["flow.De_values", [0.01, 0.03, 0.1, 0.3, 1.0, 3.0, 10.0, 30.0, 100.0]],
+]
+
+[[sweeps]]
+kind = "caber_De"
+folder = "S04_caber_sweep_De_NK_3000_hsK_0p05_phi_0p1_drag_c2d2"
+template = "caber"
+set = [
+  ["polymer.NK", 3000], ["polymer.hK_star", 0.05],
+  ["model.fe_model", "fenepm"], ["model.drag_model", "c2d2"],
+  ["concentration.phi", 0.1],
+  ["flow.De_values", [0.01, 0.03, 0.1, 0.3, 1.0, 3.0, 10.0, 30.0, 100.0]],
+]
+
+[[sweeps]]
+kind = "caber_De"
+folder = "S04_caber_sweep_De_NK_3000_hsK_0p05_phi_0p5_drag_c2d2"
+template = "caber"
+set = [
+  ["polymer.NK", 3000], ["polymer.hK_star", 0.05],
+  ["model.fe_model", "fenepm"], ["model.drag_model", "c2d2"],
+  ["concentration.phi", 0.5],
+  ["flow.De_values", [0.01, 0.03, 0.1, 0.3, 1.0, 3.0, 10.0, 30.0, 100.0]],
+]
+
+[[sweeps]]
+kind = "caber_De"
+folder = "S04_caber_sweep_De_NK_3000_hsK_0p05_phi_1_drag_c2d2"
+template = "caber"
+set = [
+  ["polymer.NK", 3000], ["polymer.hK_star", 0.05],
+  ["model.fe_model", "fenepm"], ["model.drag_model", "c2d2"],
+  ["concentration.phi", 1.0],
+  ["flow.De_values", [0.01, 0.03, 0.1, 0.3, 1.0, 3.0, 10.0, 30.0, 100.0]],
+]

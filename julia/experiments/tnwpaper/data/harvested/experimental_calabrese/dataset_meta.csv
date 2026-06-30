@@ -1,0 +1,2 @@
+dataset,dataset_sheet,hK_star_selected,source_processed_dir,n_enabled_plan_rows,n_samples,n_model_rows_all,n_model_rows_c2d2,n_expt_rows,theta,fe_model_default
+calabrese,Calabrese,0.015,/path/to/C2D2/julia/experiments/tnwpaper/outputs/exptl_comparison/calabrese/hsK_0p015/processed,16,4,72,72,12,,fenepm

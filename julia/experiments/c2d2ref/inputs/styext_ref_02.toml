@@ -1,0 +1,80 @@
+# C2D2 Julia port — reference case styext_ref_02
+# FENE-PM, C2D2 drag, Nm=3, phi=0.1
+# Multimode + concentration-dependent drag; used to validate Julia STYEXT PAC solver.
+
+[run]
+label       = "c2d2ref_styext_02"
+overwrite   = true
+write_every = 1
+out_root    = "c2d2ref/outputs"
+
+[polymer]
+Q0_sq   = 1.0
+kBT     = 1.0
+lambda0 = 1.0
+NK      = 3000
+Nm      = 3
+hK_star = 0.05
+
+[concentration]
+phi_values = [0.1]
+
+[model]
+fe_model        = "fenepm"
+drag_model      = "c2d2"
+draining_model  = "partialdraining"
+spectrum_model  = "auto"
+weights_method  = "closed-form"
+n_interior      = "auto"
+n_per_decade    = 100
+write_drag_lut_csv = false
+assess_drag_mode   = "linear-kink"
+assess_drag_axis   = "log"
+assess_spec_mode   = "linear-kink"
+assess_spec_axis   = "log"
+kink_blend_width   = 0.03
+
+[flow]
+kind   = "styext"
+alphas = [-0.5, -0.5, 1.0]
+
+[limits]
+Wi_max              = 5.0
+max_frac_stretch_sq = 0.999
+
+[continuation]
+tol_root    = 1e-8
+max_it_root = 100
+max_steps   = 5000
+ds0         = 0.001
+ds_min      = 1e-8
+ds_max      = 100.0
+grow        = 1.5
+shrink      = 0.5
+
+[newton]
+tol_res                  = 1e-8
+max_newton               = 15
+target_newton            = 10
+target_offmanifold_ratio = 0.3
+min_denom_tol            = 0.0
+tol_J_cond               = 1e-12
+use_armijo               = true
+armijo_c1                = 1e-4
+armijo_beta              = 0.5
+max_bt                   = 30
+
+[newton_fixed_Y]
+max_newton_fixed_Y = 15
+tol_FY_abs         = 1e-10
+tol_FY_rel_hard    = 100.0
+tol_FY_rel_soft    = 1e-2
+
+[postprocess]
+wi_features                       = false
+wi_features_interactive           = false
+wi_features_plot_x_scale          = "log"
+wi_features_plot_y_scale          = "log"
+wi_features_include_terminal_rows = false
+wi_features_save_candidates       = false
+wi_features_selector              = "tnw_batch"

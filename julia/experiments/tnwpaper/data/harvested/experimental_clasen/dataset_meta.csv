@@ -1,0 +1,2 @@
+dataset,dataset_sheet,hK_star_selected,source_processed_dir,n_enabled_plan_rows,n_samples,n_model_rows_all,n_model_rows_c2d2,n_expt_rows,theta,fe_model_default
+clasen,Clasen,0.04,/path/to/C2D2/julia/experiments/tnwpaper/outputs/exptl_comparison/clasen/hsK_0p04/processed,24,6,98,98,6,,fenepm

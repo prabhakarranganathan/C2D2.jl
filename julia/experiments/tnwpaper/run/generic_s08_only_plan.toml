@@ -1,0 +1,55 @@
+# Remainder of generic_inertial_matched_plan.toml after the first run was
+# killed mid-S07-phi=1 (the phi=1, De_R=1.5e-4 cell ground >25 min at 92% CPU
+# — pathological stepping in the deep-inertial semidilute corner; documented
+# in the 2026-06-11 Ko handover, cell dropped here).
+# Ko, 2026-06-11.
+
+[production]
+out_root = "julia/experiments/tnwpaper/outputs/generic_inertial"
+
+[templates]
+caber = "experiments/tnwpaper/inputs/tnwpaper_caber_sweep_de.toml"
+
+[[sweeps]]
+kind = "caber_De"
+folder = "S08_caber_sweep_DeHi_NK_3000_hsK_0p05_phi_0p01_drag_constant"
+template = "caber"
+set = [
+  ["polymer.NK", 3000], ["polymer.hK_star", 0.05],
+  ["model.fe_model", "fenepm"], ["model.drag_model", "constant"],
+  ["concentration.phi", 0.01],
+  ["flow.De_values", [300.0, 1000.0, 3000.0]],
+]
+
+[[sweeps]]
+kind = "caber_De"
+folder = "S08_caber_sweep_DeHi_NK_3000_hsK_0p05_phi_0p1_drag_constant"
+template = "caber"
+set = [
+  ["polymer.NK", 3000], ["polymer.hK_star", 0.05],
+  ["model.fe_model", "fenepm"], ["model.drag_model", "constant"],
+  ["concentration.phi", 0.1],
+  ["flow.De_values", [300.0, 1000.0, 3000.0]],
+]
+
+[[sweeps]]
+kind = "caber_De"
+folder = "S08_caber_sweep_DeHi_NK_3000_hsK_0p05_phi_0p5_drag_constant"
+template = "caber"
+set = [
+  ["polymer.NK", 3000], ["polymer.hK_star", 0.05],
+  ["model.fe_model", "fenepm"], ["model.drag_model", "constant"],
+  ["concentration.phi", 0.5],
+  ["flow.De_values", [300.0, 1000.0, 3000.0]],
+]
+
+[[sweeps]]
+kind = "caber_De"
+folder = "S08_caber_sweep_DeHi_NK_3000_hsK_0p05_phi_1_drag_constant"
+template = "caber"
+set = [
+  ["polymer.NK", 3000], ["polymer.hK_star", 0.05],
+  ["model.fe_model", "fenepm"], ["model.drag_model", "constant"],
+  ["concentration.phi", 1.0],
+  ["flow.De_values", [300.0, 1000.0, 3000.0]],
+]

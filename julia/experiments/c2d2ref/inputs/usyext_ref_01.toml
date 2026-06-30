@@ -1,0 +1,73 @@
+# C2D2 Julia port — reference case usyext_ref_01
+# FENE-PM, constant drag, Nm=1, phi=0.03, De=1.0
+# Simplest CaBER case; used to validate Julia USYEXT ETDRK2 integrator.
+
+[run]
+label       = "c2d2ref_usyext_01"
+overwrite   = true
+write_every = 1
+out_root    = "c2d2ref/outputs"
+
+[polymer]
+Q0_sq   = 1.0
+kBT     = 1.0
+lambda0 = 1.0
+NK      = 3000
+Nm      = 1
+hK_star = 0.05
+
+[concentration]
+phi = 0.03
+
+[model]
+fe_model        = "fenepm"
+drag_model      = "constant"
+draining_model  = "partialdraining"
+spectrum_model  = "auto"
+weights_method  = "closed-form"
+n_interior      = "auto"
+n_per_decade    = 100
+write_drag_lut_csv = false
+assess_drag_mode   = "linear-kink"
+assess_drag_axis   = "log"
+assess_spec_mode   = "linear-kink"
+assess_spec_axis   = "log"
+kink_blend_width   = 0.03
+
+[flow]
+kind      = "caber"
+Wi        = 1.0
+De_values = [1.0]
+alphas    = [-0.5, -0.5, 1.0]
+
+[limits]
+max_frac_stretch_sq = 0.95
+
+[integration]
+independent               = "auto"
+strain_max                = 25.0
+dstrain_init              = 1e-3
+dstrain_min               = 1e-9
+dstrain_max               = 5e-2
+rtol                      = 1e-7
+atol                      = 1e-9
+Wi_min_strain_independent = 0.0
+dt_init                   = 1e-3
+
+[output]
+sample_mode = "strain_grid"
+dstrain_out = 0.05
+
+[initial_condition]
+kind                = "equilibrium"
+micro_affine_strain = 0.0
+apply_to_modes      = "all"
+
+[postprocess]
+wi_features                       = false
+wi_features_interactive           = false
+wi_features_plot_x_scale          = "log"
+wi_features_plot_y_scale          = "log"
+wi_features_include_terminal_rows = false
+wi_features_save_candidates       = false
+wi_features_selector              = "tnw_batch"

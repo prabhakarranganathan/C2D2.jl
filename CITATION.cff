@@ -1,0 +1,37 @@
+cff-version: 1.2.0
+message: "If you use this software, please cite both the software and the accompanying technical note below."
+title: "C2D2.jl: numerical algorithms for the rheology of unentangled flexible-polymer solutions using the Conformation- and Concentration-Dependent Drag (C2D2) model"
+type: software
+authors:
+  - family-names: Ranganathan
+    given-names: Prabhakar
+    orcid: "https://orcid.org/0000-0001-7357-4222"
+    affiliation: "Department of Mechanical and Aerospace Engineering, Monash University, Australia"
+    email: prabhakar.ranganathan@monash.edu
+repository-code: "https://github.com/prabhakarranganathan/C2D2.jl"
+url: "https://github.com/prabhakarranganathan/C2D2.jl"
+license: MIT
+version: "1.0.0"          # update to the actual public-release tag
+date-released: "2026-06-30"  # update to the actual public-release date
+keywords:
+  - viscoelasticity
+  - polymer solutions
+  - rheology
+  - constitutive model
+  - hydrodynamic interactions
+  - finite extensibility
+  - extensional flow
+  - Julia
+preferred-citation:
+  type: report
+  title: "Technical Note (draft) on the Conformation- and Concentration-Dependent Drag (C2D2) model for unentangled solutions of flexible polymers and numerical algorithms for rheological properties in steady and unsteady flows"
+  authors:
+    - family-names: Ranganathan
+      given-names: Prabhakar
+      orcid: "https://orcid.org/0000-0001-7357-4222"
+      affiliation: "Department of Mechanical and Aerospace Engineering, Monash University, Australia"
+  year: 2025
+  institution:
+    name: "Monash University"
+  doi: "10.5281/zenodo.18012677"
+  url: "https://doi.org/10.5281/zenodo.18012677"

@@ -1,0 +1,13 @@
+# macOS
+.DS_Store
+
+# Julia
+Manifest.toml
+*.cov
+*.jl.*.cov
+
+# generated run outputs
+**/output/
+**/outputs/
+julia/examples/output/
+**/figures/
