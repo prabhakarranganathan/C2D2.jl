@@ -11,8 +11,12 @@ authors:
 repository-code: "https://github.com/prabhakarranganathan/C2D2.jl"
 url: "https://github.com/prabhakarranganathan/C2D2.jl"
 license: MIT
-version: "1.0.0"          # update to the actual public-release tag
-date-released: "2026-06-30"  # update to the actual public-release date
+version: "1.0.0"
+date-released: "2026-07-01"
+identifiers:
+  - type: doi
+    value: "10.5281/zenodo.21090147"
+    description: "Archived software (this version, v1.0.0)"
 keywords:
   - viscoelasticity
   - polymer solutions

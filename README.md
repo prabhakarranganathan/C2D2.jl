@@ -1,6 +1,7 @@
 # C2D2 — Conformation- and Concentration-Dependent Drag
 
-[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.18012677.svg)](https://doi.org/10.5281/zenodo.18012677)
+[![Software DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.21090147.svg)](https://doi.org/10.5281/zenodo.21090147)
+[![Report DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.18012677.svg)](https://doi.org/10.5281/zenodo.18012677)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
 A Julia implementation of the **C2D2** constitutive model for the rheology of
@@ -18,6 +19,12 @@ The code solves two homogeneous flow problems:
 
 The accompanying technical report is archived on Zenodo:
 [10.5281/zenodo.18012677](https://doi.org/10.5281/zenodo.18012677).
+
+## Status and support
+
+**This codebase is under active development and evolving.** If you encounter bugs
+or other issues, please email <prabhakar.ranganathan@monash.edu>. We cannot offer
+routine technical support, but will try to address serious issues as soon as we can.
 
 ## Requirements
 
@@ -110,9 +117,10 @@ docs/
 
 ## Citing
 
-If you use this software, please cite it via the metadata in
-[`CITATION.cff`](CITATION.cff) and the technical report DOI
-[10.5281/zenodo.18012677](https://doi.org/10.5281/zenodo.18012677).
+If you use this software, please cite both:
+
+- the software — archived at [10.5281/zenodo.21090147](https://doi.org/10.5281/zenodo.21090147) (metadata in [`CITATION.cff`](CITATION.cff)); and
+- the accompanying technical report — [10.5281/zenodo.18012677](https://doi.org/10.5281/zenodo.18012677).
 
 ## License
 
