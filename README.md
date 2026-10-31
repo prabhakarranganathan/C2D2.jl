@@ -1,6 +1,6 @@
 # C2D2 — Conformation- and Concentration-Dependent Drag
 
-[![Software DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.21090147.svg)](https://doi.org/10.5281/zenodo.21090147)
+[![Software DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.23848153.svg)](https://doi.org/10.5281/zenodo.23848153)
 [![Report DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.18012677.svg)](https://doi.org/10.5281/zenodo.18012677)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
@@ -187,7 +187,7 @@ docs/
 
 If you use this software, please cite both:
 
-- the software — archived at [10.5281/zenodo.21090147](https://doi.org/10.5281/zenodo.21090147) (metadata in [`CITATION.cff`](CITATION.cff)); and
+- the software — this version (v1.1.0) is archived at [10.5281/zenodo.23848153](https://doi.org/10.5281/zenodo.23848153); the concept DOI [10.5281/zenodo.21089959](https://doi.org/10.5281/zenodo.21089959) always resolves to the latest version (metadata in [`CITATION.cff`](CITATION.cff)); and
 - the accompanying technical report — [10.5281/zenodo.18012677](https://doi.org/10.5281/zenodo.18012677).
 
 ## License
