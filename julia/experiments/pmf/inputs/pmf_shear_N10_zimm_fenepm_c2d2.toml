@@ -1,0 +1,61 @@
+# PMF reference case: steady simple shear, FENE-PM, c2d2 drag (RP scheme), Nm=10, fixed Zimm spectrum (p^-1.5), phi=0.
+# Matches julia/experiments/test/reference/pmf_shear_N10_zimm_fenepm_c2d2.csv (Python full-tensor reference, 2026-10-16).
+
+[run]
+label = "pmf_shear_N10_zimm_fenepm_c2d2"
+
+[polymer]
+Q0_sq   = 1.0
+kBT     = 1.0
+lambda0 = 1.0
+NK      = 500
+hK_star = 0.25
+Nm      = 10
+
+[concentration]
+phi = 0.0
+
+[model]
+fe_model        = "fenepm"
+drag_model      = "c2d2"
+drag_interp     = "RP"
+draining_model  = "nondraining"
+spectrum_model  = "zimm-scaling"
+drag_lut_n_points = 4000   # 400 (global default) limits c2d2 agreement to ~1e-5 near E≈1 (PCHIP LUT error at the drag onset); 4000 → ~1e-7
+
+[flow]
+kind          = "pmf"
+r             = 1.0
+Wi_convention = "shear"
+
+[limits]
+Wi_max              = 1e3     # PAC stop (shear convention). Multimode FENE-PM Y saturates below E_inf^2 in shear, so Y_stop never fires.
+max_frac_stretch_sq = 0.999
+
+[sweep]
+Wi_min       = 1e-2
+Wi_max       = 1e3
+n_per_decade = 5
+
+[continuation]
+max_steps = 5000
+ds0       = 0.001
+ds_min    = 1e-8
+ds_max    = 100.0
+
+[newton]
+tol_res                  = 1e-10
+max_newton               = 30
+target_newton            = 10
+target_offmanifold_ratio = 0.3
+min_denom_tol            = 0.0
+tol_J_cond               = 1e-14
+use_armijo               = true
+armijo_c1                = 1e-4
+armijo_beta              = 0.5
+max_bt                   = 30
+
+[newton_fixed_Y]
+max_newton_fixed_Y = 30
+tol_FY_rel_hard    = 100.0
+tol_FY_rel_soft    = 1e-2

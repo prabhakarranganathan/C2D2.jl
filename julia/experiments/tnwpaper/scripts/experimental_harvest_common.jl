@@ -41,7 +41,13 @@ export repo_root, default_matlab_tnwpaper_root, default_plan_xlsx,
 
 repo_root() = normpath(joinpath(paper_root(), "..", "..", ".."))
 default_matlab_tnwpaper_root() = joinpath(repo_root(), "matlab", "experiments", "tnwpaper")
-default_plan_xlsx() = joinpath(default_matlab_tnwpaper_root(), "parameter-sets.xlsx")
+# Prefer the Julia-side workbook (source of truth for Julia runs); fall back to the
+# MATLAB copy only if absent, so the fully-Julia pipeline works on a fresh checkout.
+function default_plan_xlsx()
+    jl = joinpath(paper_root(), "parameter-sets.xlsx")
+    isfile(jl) && return jl
+    return joinpath(default_matlab_tnwpaper_root(), "parameter-sets.xlsx")
+end
 
 # Julia side expects the symlink:
 # julia/experiments/tnwpaper/outputs/exptl_comparison -> ../../../../matlab/experiments/tnwpaper/outputs/exptl_comparison

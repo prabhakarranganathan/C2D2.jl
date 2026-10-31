@@ -1,0 +1,38 @@
+[run]
+label = "styext_v2_OESI"
+[polymer]
+Q0_sq = 1.0
+kBT = 1.0
+lambda0 = 1.0
+NK = 5000
+Nm = 1
+hK_star = 0.025
+[concentration]
+phi = 1.0
+[model]
+fe_model = "fenep"
+drag_model = "c2d2"
+draining_model = "partialdraining"
+spectrum_model = "auto"
+drag_interp = "OESI"
+p_phi = 2.0
+q_oes = 0.25
+drag_lut_n_points = 4000
+[flow]
+kind = "styext"
+alphas = [-0.5, -0.5, 1.0]
+[limits]
+Wi_max = 20.0
+max_frac_stretch_sq = 0.999
+[continuation]
+max_steps = 40000
+ds0 = 0.001
+ds_min = 1e-10
+ds_max = 0.5
+[newton]
+tol_res = 1e-8
+max_newton = 15
+target_newton = 10
+target_offmanifold_ratio = 0.3
+[newton_fixed_Y]
+tol_FY_rel_hard = 100.0

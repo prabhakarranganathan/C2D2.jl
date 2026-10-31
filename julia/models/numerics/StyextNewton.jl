@@ -23,9 +23,10 @@ module StyextNewton
 
 using LinearAlgebra: norm, dot, cond, lu, ldiv!
 
-using ..StyextModelPack: StyextMPCtx, rj_pac, rj_fixed_Y, unpack_ztilde, pack_ztilde
+using ..StyextModelPack: StyextMPCtx, rj_pac, rj_fixed_Y, rj_fixed_Wi,
+                          unpack_ztilde, pack_ztilde
 
-export SolverOpts, SolverStatus, newton_pac, newton_fixed_Y
+export SolverOpts, SolverStatus, newton_pac, newton_fixed_Y, newton_fixed_Wi
 
 # ── Solver control parameters ─────────────────────────────────────────────────
 
@@ -149,7 +150,13 @@ function _newton_loop!(z        :: Vector{Float64},
                        idx_FY   :: Int)
 
     for it in 1:max_it
-        F, J, info = builder(z)
+        built = _safe_build(builder, z)
+        if built === nothing          # iterate outside the model domain (e.g. FENE pole)
+            status.min_denom_fail = true
+            status.newton_iters   = it
+            break
+        end
+        F, J, info = built
         Fv   = vec(F)
         resn = norm(Fv)
 
@@ -196,7 +203,12 @@ function _newton_loop!(z        :: Vector{Float64},
                 bt += 1
                 z_trial = z .+ alpha .* d
 
-                F_trial, _, info_trial = builder(z_trial)
+                built_trial = _safe_build(builder, z_trial)
+                if built_trial === nothing       # trial hit the FENE pole → shorten step
+                    alpha *= opts.armijo_beta
+                    continue
+                end
+                F_trial, _, info_trial = built_trial
                 Fv_trial = vec(F_trial)
                 phi_trial = 0.5 * dot(Fv_trial, Fv_trial)
 
@@ -217,7 +229,16 @@ function _newton_loop!(z        :: Vector{Float64},
             status.armijo_bt_total += bt
 
             if !accepted
-                status.armijo_fail = true
+                # Line search exhausted. If the residual is already at the
+                # floating-point floor relative to the state scale (|Y| can be
+                # 1e4–1e5 for multimode FENE-PM near the pole, where an absolute
+                # tol_res = 1e-10 is unreachable), accept as converged
+                # (2026-10-16; seen in fixed-Wi shear sweeps, KMR grid).
+                if resn <= opts.tol_res * max(1.0, abs(z[idx_FY]))
+                    status.converged = true
+                else
+                    status.armijo_fail = true
+                end
                 break
             end
         end
@@ -230,12 +251,39 @@ function _newton_loop!(z        :: Vector{Float64},
     end
 
     # FY diagnostics at exit
-    F_end, _, info_end = builder(z)
-    Fv_end = vec(F_end)
-    _fy_diag!(status, Fv_end, z, idx_FY, E0_sq, opts)
-    status.Wi_pole = info_end.Wi_pole
+    built_end = _safe_build(builder, z)
+    if built_end === nothing
+        status.min_denom_fail = true
+        status.FY_residual = NaN
+        status.FY_rel      = NaN
+        status.FY_rel_hard_fail = true
+        status.FY_rel_soft_fail = true
+    else
+        F_end, _, info_end = built_end
+        Fv_end = vec(F_end)
+        _fy_diag!(status, Fv_end, z, idx_FY, E0_sq, opts)
+        status.Wi_pole = info_end.Wi_pole
+    end
 
     nothing
+end
+
+"""
+    _safe_build(builder, z) -> (F, J, info) | nothing
+
+Evaluate the residual builder, returning `nothing` when the iterate lies
+outside the model's domain (the FENE kernel throws an ArgumentError at
+χ ≥ Q∞²). Any other exception propagates. Lets Newton/Armijo treat a pole
+overshoot as a rejected step instead of aborting the whole solve
+(2026-10-16; first seen in fixed-Wi sweeps near the extensional pole).
+"""
+function _safe_build(builder::Function, z::Vector{Float64})
+    try
+        return builder(z)
+    catch e
+        e isa ArgumentError && return nothing
+        rethrow()
+    end
 end
 
 # ── PAC Newton ───────────────────────────────────────────────────────────────
@@ -324,6 +372,43 @@ function newton_fixed_Y(ctx     :: StyextMPCtx,
     z[Na + 1] = Y_fixed
     z[Na + 2] = z_red[Na + 1]
 
+    return z, status
+end
+
+# ── Fixed-Wi Newton ───────────────────────────────────────────────────────────
+
+"""
+    newton_fixed_Wi(ctx, z0, Wi, opts) -> (z_new, status)
+
+Newton + Armijo solver for the closure state Z = [X(1:Na); Y] at a prescribed
+Wi (direct Wi sweeps; see `rj_fixed_Wi`).
+
+z0 may be the full ztilde = [X; Y; μ] (μ ignored) or the reduced [X; Y].
+Returns the full vector z = [X; Y; μ] with μ = μ(Wi) for the flow's map
+(NaN when the final iterate is inadmissible).
+"""
+function newton_fixed_Wi(ctx  :: StyextMPCtx,
+                         z0   :: AbstractVector{Float64},
+                         Wi   :: Float64,
+                         opts :: SolverOpts)
+    Na = ctx.Na
+    length(z0) in (Na + 1, Na + 2) ||
+        error("newton_fixed_Wi: length(z0)=$(length(z0)) must be Na+1 or Na+2")
+
+    z_red = Vector{Float64}(z0[1:Na+1])      # [X; Y]
+    status = _init_status()
+
+    builder = (zr::Vector{Float64}) -> rj_fixed_Wi(ctx, zr, Wi)
+
+    idx_FY = Na + 1
+    E0_sq  = ctx.Ymin
+
+    _newton_loop!(z_red, builder, opts, opts.max_newton, status, E0_sq, idx_FY)
+
+    _, _, info_end = builder(z_red)
+    z = Vector{Float64}(undef, Na + 2)
+    z[1:Na+1] .= z_red
+    z[Na + 2]  = info_end.mu
     return z, status
 end
 

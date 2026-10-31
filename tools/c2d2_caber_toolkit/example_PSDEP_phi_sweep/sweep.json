@@ -1,0 +1,100 @@
+{
+ "tool": "C2D2 CaBER toolkit",
+ "version": 1,
+ "tag": "phitest",
+ "folder": "phitest_2026-10-12_100315",
+ "created": "2026-10-11T23:03:15.917Z",
+ "preset": {
+  "sample": "Z1",
+  "Mw": 2800000,
+  "ppm": 10000,
+  "lambda1_s": 0.0051173
+ },
+ "fixed": {
+  "NK": 3774,
+  "hK_star": 0.015,
+  "Nm": 1,
+  "spectrum_model": "auto",
+  "De": 14.59857,
+  "eps0": 0,
+  "fe_model": "fenepm",
+  "drag_model": "c2d2",
+  "strain_max": 25
+ },
+ "sweep": {
+  "param": "phi",
+  "values": [
+   1.5,
+   3,
+   6
+  ]
+ },
+ "runs": [
+  {
+   "id": "styext_01_phi1.5",
+   "kind": "styext",
+   "sweep_value": 1.5,
+   "styext": null,
+   "NK": 3774,
+   "phi": 1.5,
+   "hK_star": 0.015,
+   "De": null,
+   "eps0": null
+  },
+  {
+   "id": "styext_02_phi3",
+   "kind": "styext",
+   "sweep_value": 3,
+   "styext": null,
+   "NK": 3774,
+   "phi": 3,
+   "hK_star": 0.015,
+   "De": null,
+   "eps0": null
+  },
+  {
+   "id": "styext_03_phi6",
+   "kind": "styext",
+   "sweep_value": 6,
+   "styext": null,
+   "NK": 3774,
+   "phi": 6,
+   "hK_star": 0.015,
+   "De": null,
+   "eps0": null
+  },
+  {
+   "id": "caber_01_phi1.5",
+   "kind": "caber",
+   "sweep_value": 1.5,
+   "styext": "styext_01_phi1.5",
+   "NK": 3774,
+   "phi": 1.5,
+   "hK_star": 0.015,
+   "De": 14.59857,
+   "eps0": 0
+  },
+  {
+   "id": "caber_02_phi3",
+   "kind": "caber",
+   "sweep_value": 3,
+   "styext": "styext_02_phi3",
+   "NK": 3774,
+   "phi": 3,
+   "hK_star": 0.015,
+   "De": 14.59857,
+   "eps0": 0
+  },
+  {
+   "id": "caber_03_phi6",
+   "kind": "caber",
+   "sweep_value": 6,
+   "styext": "styext_03_phi6",
+   "NK": 3774,
+   "phi": 6,
+   "hK_star": 0.015,
+   "De": 14.59857,
+   "eps0": 0
+  }
+ ]
+}

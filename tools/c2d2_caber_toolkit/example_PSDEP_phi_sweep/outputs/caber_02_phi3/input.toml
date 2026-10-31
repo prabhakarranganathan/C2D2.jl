@@ -1,0 +1,61 @@
+# C2D2 CaBER (capillary thinning) input, written by the C2D2 CaBER toolkit
+# sweep "phitest", phi = 3; steady curve: styext_02_phi3
+# run with:  julia c2d2_run.jl <path to C2D2.jl> inputs/caber_02_phi3.toml
+
+[run]
+label = "caber_02_phi3"
+
+[polymer]
+Q0_sq   = 1.0
+kBT     = 1.0
+lambda0 = 1.0          # all times are scaled with lambda_1 = lambda0 = 1
+NK      = 3774
+Nm      = 1
+hK_star = 0.015
+
+[concentration]
+phi = 3.0
+
+[model]
+fe_model           = "fenepm"
+drag_model         = "c2d2"
+draining_model     = "partialdraining"
+spectrum_model     = "auto"
+weights_method     = "closed-form"
+n_interior         = "auto"
+n_per_decade       = 100
+write_drag_lut_csv = false
+assess_drag_mode   = "linear-kink"
+assess_drag_axis   = "log"
+assess_spec_mode   = "linear-kink"
+assess_spec_axis   = "log"
+kink_blend_width   = 0.03
+
+[flow]
+kind   = "caber"
+De     = 14.59857    # lambda_1 / t_v,  t_v = eta_s R0 / sigma
+alphas = [-0.5, -0.5, 1.0]
+
+[limits]
+max_frac_stretch_sq = 0.95
+
+[integration]
+independent  = "auto"
+strain_max   = 25.0
+dstrain_init = 1e-3
+dstrain_min  = 1e-9
+dstrain_max  = 5e-2
+rtol         = 1e-7
+atol         = 1e-9
+Wi_min_strain_independent = 0.01
+max_wall_s   = 3600.0
+dt_init      = 1e-3
+
+[output]
+sample_mode = "strain_grid"
+dstrain_out = 0.01
+
+[initial_condition]
+kind                = "equilibrium"
+micro_affine_strain = 0.0
+apply_to_modes      = "all"

@@ -1,0 +1,1225 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>C2D2 CaBER Toolkit</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/plotly.js/2.35.3/plotly-basic.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+<style>
+  :root{
+    --bg:#0f1420; --panel:#171d2b; --panel2:#1f2637; --ink:#e7ecf5; --muted:#9aa7bd;
+    --acc:#5aa0ff; --acc2:#7ad0b8; --warn:#e0a34a; --bad:#e06060; --line:#2b3346; --chip:#243049;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif}
+  header{padding:18px 24px;border-bottom:1px solid var(--line);background:linear-gradient(180deg,#141a28,#0f1420)}
+  header h1{margin:0;font-size:20px;letter-spacing:.2px}
+  header p{margin:4px 0 0;color:var(--muted);font-size:13px}
+  .tabs{display:flex;gap:6px;padding:10px 24px 0;border-bottom:1px solid var(--line);background:var(--panel);flex-wrap:wrap}
+  .tab{padding:9px 16px;border:1px solid var(--line);border-bottom:none;border-radius:8px 8px 0 0;background:var(--panel2);color:var(--muted);cursor:pointer;font-weight:600}
+  .tab.active{background:var(--bg);color:var(--ink);border-color:var(--acc)}
+  main{padding:20px 24px;max-width:1280px}
+  .grid{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:16px}
+  @media(max-width:960px){.grid{grid-template-columns:1fr}}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:14px 16px;margin-bottom:16px}
+  .card h2{margin:0 0 4px;font-size:15px;color:var(--acc)}
+  .card .sub{color:var(--muted);font-size:12.5px;margin:0 0 10px}
+  .field{margin:8px 0;padding-bottom:9px;border-bottom:1px dashed var(--line)}
+  .field:last-child{border-bottom:none}
+  .field .row{display:flex;align-items:center;gap:10px;justify-content:space-between;flex-wrap:wrap}
+  .field label{font-weight:600;font-size:13.5px}
+  .field .key{color:var(--muted);font-weight:400;font-size:11.5px;font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+  input[type=number],input[type=text],select{background:var(--panel2);border:1px solid var(--line);color:var(--ink);border-radius:7px;padding:6px 8px;font:13px ui-monospace,Menlo,monospace}
+  .field input[type=number],.field input[type=text],.field select{width:190px}
+  .field input.wide{width:100%;margin-top:6px}
+  input:disabled{opacity:.45}
+  .swept{outline:2px solid var(--acc2)}
+  .help{color:var(--muted);font-size:12.5px;margin-top:5px}
+  .help b{color:var(--ink);font-weight:600}
+  details.adv{margin-top:6px}
+  details.adv>summary{cursor:pointer;color:var(--acc2);font-weight:600;font-size:13px;padding:6px 0}
+  pre.code{width:100%;max-height:360px;background:#0b0f18;color:#cfe3ff;border:1px solid var(--line);border-radius:10px;padding:12px;font:12px/1.5 ui-monospace,Menlo,monospace;white-space:pre;overflow:auto;margin:6px 0}
+  .btn{background:var(--acc);color:#06122b;border:none;border-radius:8px;padding:9px 14px;font-weight:700;cursor:pointer;margin:4px 8px 4px 0}
+  .btn.sec{background:var(--chip);color:var(--ink);border:1px solid var(--line)}
+  .btn:disabled{opacity:.5;cursor:default}
+  .pill{display:inline-block;background:var(--chip);border:1px solid var(--line);border-radius:999px;padding:2px 10px;font-size:12px;margin:2px;font-family:ui-monospace,Menlo,monospace}
+  .warnbox{background:#3a2c17;border:1px solid var(--warn);color:#f0d3a0;border-radius:8px;padding:8px 10px;font-size:13px;margin:8px 0}
+  .okbox{background:#16301f;border:1px solid #3f7d55;color:#bfeccd;border-radius:8px;padding:8px 10px;font-size:13px;margin:8px 0}
+  .errbox{background:#3a1b1b;border:1px solid var(--bad);color:#ffc9c9;border-radius:8px;padding:8px 10px;font-size:13px;margin:8px 0}
+  pre.code code{background:none;border:none;padding:0;font-size:inherit}
+  code{background:#0b0f18;border:1px solid var(--line);border-radius:5px;padding:1px 5px;font-size:12px}
+  a{color:var(--acc)}
+  .hidden{display:none !important}
+  .radios{display:flex;flex-wrap:wrap;gap:6px;margin:6px 0}
+  .radios label{background:var(--panel2);border:1px solid var(--line);border-radius:999px;padding:4px 12px;cursor:pointer;font-weight:600;font-size:13px}
+  .radios input{display:none}
+  .radios input:checked+span{color:var(--acc2)}
+  .radios label:has(input:checked){border-color:var(--acc2);background:#173029}
+  table.runs{width:100%;border-collapse:collapse;font-size:12.5px;font-family:ui-monospace,Menlo,monospace}
+  table.runs th,table.runs td{border-bottom:1px solid var(--line);padding:4px 6px;text-align:right;white-space:nowrap}
+  table.runs th{color:var(--muted);font-weight:600;position:sticky;top:0;background:var(--panel)}
+  table.runs td:first-child,table.runs th:first-child{text-align:left}
+  .tablewrap{max-height:300px;overflow:auto;border:1px solid var(--line);border-radius:8px}
+  .subtabs{display:flex;gap:4px;margin-top:8px;flex-wrap:wrap}
+  .subtab{padding:4px 10px;border:1px solid var(--line);border-radius:6px;background:var(--panel2);color:var(--muted);cursor:pointer;font-size:12.5px;font-family:ui-monospace,Menlo,monospace}
+  .subtab.active{color:var(--ink);border-color:var(--acc)}
+  .plotgrid{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:14px}
+  @media(max-width:960px){.plotgrid{grid-template-columns:1fr}}
+  .plotwrap{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:10px 12px}
+  .plotwrap h3{margin:0 0 4px;font-size:14px;color:var(--acc2)}
+  .plotwrap .help{margin:0 0 4px}
+  .plot{height:330px}
+  .ctl{display:flex;flex-wrap:wrap;gap:12px;align-items:center;color:var(--muted);font-size:13px;margin:6px 0}
+  .ctl input[type=number]{width:100px}
+  .st-ok{color:#8fe0ae}.st-failed{color:#ff9d9d}.st-running{color:var(--warn)}.st-pending{color:var(--muted)}
+  .doc h3{color:var(--acc);font-size:15px;margin:18px 0 6px}
+  .doc p,.doc li{font-size:14px}
+  .doc table{border-collapse:collapse;font-size:13px;margin:6px 0}
+  .doc td,.doc th{border:1px solid var(--line);padding:4px 8px;vertical-align:top;text-align:left}
+  .doc th{color:var(--muted)}
+  .calc{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-top:6px;font-size:12.5px;color:var(--muted)}
+  .calc input[type=number]{width:90px}
+</style>
+</head>
+<body>
+<header>
+  <h1>C2D2 CaBER Toolkit</h1>
+  <p>Set up a capillary-thinning (CaBER) sweep with the matching steady-extension runs, write the run folder and its job scripts, and look at the results as they come in. Everything happens in your browser; nothing is uploaded.</p>
+</header>
+<div class="tabs">
+  <div class="tab active" id="tab-setup" onclick="showTab('setup')">① Set up a sweep</div>
+  <div class="tab" id="tab-view" onclick="showTab('view')">② View results</div>
+  <div class="tab" id="tab-help" onclick="showTab('help')">③ How to run · output files</div>
+</div>
+
+<!-- ============================ SETUP ============================ -->
+<main id="panel-setup">
+<div class="grid">
+<div>
+  <div class="card">
+    <h2>Run</h2>
+    <div class="field"><div class="row"><label>Run tag</label><input type="text" id="tag" value="my_sweep"/></div>
+      <div class="help">A short name for the whole sweep. The run folder is called <code>&lt;tag&gt;_&lt;date&gt;_&lt;time&gt;</code>, so repeated runs never overwrite each other.</div></div>
+    <div class="field"><div class="row"><label>Start from a preset</label><select id="preset" style="width:100%;margin-top:6px"></select></div>
+      <div class="help">The PS-in-DEP solutions of Clasen et al. (2006) with the values we use for them: N<sub>K</sub> = M<sub>w</sub>/742 g mol<sup>−1</sup>, φ, De from the SAOS λ<sub>1</sub>, and h*<sub>K</sub> = 0.015. Choosing one fills the fields below; you can still edit them.</div></div>
+    <div class="field"><div class="row"><label>Where C2D2.jl lives</label></div>
+      <input type="text" class="wide" id="c2d2root" placeholder="/Users/you/C2D2.jl"/>
+      <div class="help">The full path to your clone of <code>github.com/prabhakarranganathan/C2D2.jl</code> (the folder that contains <code>julia/models</code>). It is written into the job scripts. You can change it later by editing the scripts or by setting <code>C2D2_ROOT</code>. This page remembers it.</div></div>
+    <div class="field"><div class="row"><label>Julia command</label><input type="text" id="juliacmd" value="julia"/></div>
+      <div class="help">How Julia is started on the machine that runs the job: usually just <code>julia</code>, or a full path, or <code>module load julia &amp;&amp; julia</code> on a cluster (put module loads in the SLURM box below instead).</div></div>
+  </div>
+
+  <div class="card">
+    <h2>Polymer and solution</h2>
+    <div class="sub">The fluid is a C2D2 fluid fixed by N<sub>K</sub>, φ and h*<sub>K</sub>. The steady-extension curve is computed once for each distinct (N<sub>K</sub>, φ, h*<sub>K</sub>).</div>
+    <div class="field"><div class="row"><label>N<sub>K</sub> <span class="key">NK</span></label><input type="number" id="NK" step="1" min="2"/></div>
+      <div class="help">Kuhn steps per chain, N<sub>K</sub> = M<sub>w</sub>/M<sub>K</sub>. For polystyrene we use M<sub>K</sub> ≈ 742 g mol<sup>−1</sup>, so 2.8 M → 3774.</div></div>
+    <div class="field"><div class="row"><label>φ <span class="key">phi</span></label><input type="number" id="phi" step="any" min="0"/></div>
+      <div class="help">Scaled concentration c/c*, read as the volume fraction of pervaded coils (c* in the C2D2 convention of the report and paper). φ &lt; 1 is dilute; φ &gt; 1 is semidilute.</div></div>
+    <div class="field"><div class="row"><label>h*<sub>K</sub> <span class="key">hK_star</span></label><input type="number" id="hK" step="any" min="0"/></div>
+      <div class="help">The hydrodynamic-interaction (segmental friction) parameter of one Kuhn segment. It sets how strongly the drag changes as the coil stretches and as the solution crowds. We use 0.015 for PS in DEP.</div></div>
+    <div class="field"><div class="row"><label>Number of modes <span class="key">Nm</span></label><input type="number" id="Nm" step="1" min="1"/></div>
+      <div class="help"><b>1</b> is the single-mode (dumbbell) C2D2 model. With more modes (10 to 100) the chain's fast internal modes are resolved; in our tests 10, 30 and 100 modes agree closely. Cost grows with N<sub>m</sub>: a single-mode CaBER run takes seconds; 100 modes takes a few minutes.</div></div>
+    <div class="field" id="specField"><div class="row"><label>Relaxation spectrum <span class="key">spectrum_model</span></label>
+      <select id="spectrum">
+        <option value="auto">blob (C2D2 default)</option>
+        <option value="rouse_scaling">Rouse scaling, λ<sub>p</sub> ∝ p⁻²</option>
+        <option value="zimm_scaling">Zimm scaling, λ<sub>p</sub> ∝ p⁻³ᐟ²</option>
+        <option value="rouse_full">Rouse, full eigenvalues</option>
+      </select></div>
+      <div class="help">Only matters when N<sub>m</sub> &gt; 1. <b>blob</b> lets each mode's relaxation time cross over from Zimm to Rouse with the blob picture; it follows the drag as the solution crowds and the chain stretches. This multimode spectrum is newer than the single-mode model and has not been through peer review yet. The pure Rouse and Zimm scalings are useful checks.</div></div>
+  </div>
+
+  <div class="card">
+    <h2>Flow and starting state</h2>
+    <div class="field"><div class="row"><label>De <span class="key">De</span></label><input type="number" id="De" step="any" min="0"/></div>
+      <div class="help">Deborah number of the thinning filament, De = λ<sub>1</sub>/t<sub>v</sub>, with t<sub>v</sub> = η<sub>s</sub>R<sub>0</sub>/σ the solvent viscocapillary time. λ<sub>1</sub> is the longest relaxation time of the <b>solution</b> (e.g. from SAOS), not a time estimated from the bead drag. The code integrates in units of t<sub>v</sub>, so t/λ<sub>1</sub> = t/De.
+        <div class="calc">From your experiment: λ<sub>1</sub> [s] <input type="number" id="cl" step="any"/> η<sub>s</sub> [Pa s] <input type="number" id="ce" step="any"/> σ [N/m] <input type="number" id="cs" step="any"/> R<sub>0</sub> [mm] <input type="number" id="cr" step="any"/> <button class="btn sec" style="padding:4px 10px" onclick="calcDe()">→ De</button> <span id="cout"></span></div></div></div>
+    <div class="field"><div class="row"><label>Prestretch ε<sub>0</sub> <span class="key">micro_affine_strain</span></label><input type="number" id="eps0" step="any" min="0"/></div>
+      <div class="help">Hencky strain of an affine stretch of the coils at t = 0, standing in for the stretch left by the step-strain that forms the filament. <b>0</b> starts from equilibrium. ε<sub>0</sub> = 1 is a reasonable upper estimate for a CaBER step.</div>
+      <div class="warnbox hidden" id="psWarn">With N<sub>m</sub> &gt; 1 the prestretch is applied to <b>every</b> mode, including the fast ones, which then start far from equilibrium and relax back almost at once. That is not a physical starting state. We use prestretch only with the single-mode model.</div></div>
+  </div>
+
+  <div class="card">
+    <h2>Sweep</h2>
+    <div class="sub">Choose one parameter to vary; all the others stay at the values above.</div>
+    <div class="radios" id="sweepRadios"></div>
+    <div id="sweepBox">
+      <div class="ctl">
+        <label><input type="radio" name="vmode" value="list" checked onchange="update()"/> list</label>
+        <label><input type="radio" name="vmode" value="range" onchange="update()"/> range</label>
+      </div>
+      <div id="listBox"><input type="text" class="wide" id="vlist" placeholder="e.g. 1, 2, 5, 10"/>
+        <div class="help">Comma- or space-separated values.</div></div>
+      <div id="rangeBox" class="ctl hidden">
+        from <input type="number" id="vfrom" step="any"/> to <input type="number" id="vto" step="any"/>
+        points <input type="number" id="vn" step="1" min="2" value="5"/>
+        <select id="vspace"><option value="log">log-spaced</option><option value="lin">evenly spaced</option></select>
+      </div>
+      <div id="vchips" style="margin-top:6px"></div>
+    </div>
+    <details class="adv"><summary>Advanced solver settings</summary>
+      <div class="field"><div class="row"><label>Final Hencky strain <span class="key">strain_max</span></label><input type="number" id="strain_max" step="any"/></div>
+        <div class="help">The CaBER run stops at ε = 2 ln(R<sub>0</sub>/R) = strain_max. 25 takes R/R<sub>0</sub> down to about 4×10⁻⁶.</div></div>
+      <div class="field"><div class="row"><label>Output spacing in strain <span class="key">dstrain_out</span></label><input type="number" id="dstrain_out" step="any"/></div>
+        <div class="help">The CaBER outputs are written every this much Hencky strain.</div></div>
+      <div class="field"><div class="row"><label>Stretch cap <span class="key">max_frac_stretch_sq</span></label><input type="number" id="maxfrac" step="any"/></div>
+        <div class="help">The CaBER run stops if the chain reaches this fraction of its full contour length squared (close to the FENE limit).</div></div>
+      <div class="field"><div class="row"><label>Steady curve up to Wi <span class="key">Wi_max</span></label><input type="number" id="Wi_max" step="any"/></div>
+        <div class="help">The largest Wi on the steady-extension curve. Wi = ε̇λ<sub>1</sub>.</div></div>
+      <div class="field"><div class="row"><label>Spring law <span class="key">fe_model</span></label><select id="fe"><option value="fenepm">FENE-PM</option><option value="fenepme">FENE-PME</option><option value="fenep">FENE-P</option></select></div></div>
+      <div class="field"><div class="row"><label>Drag model <span class="key">drag_model</span></label><select id="drag"><option value="c2d2">C2D2</option><option value="c1d2">C1D2 (conformation only)</option><option value="constant">constant drag</option></select></div>
+        <div class="help">Switch away from C2D2 only for comparisons.</div></div>
+      <div class="field"><div class="row"><label>Drag interpolation <span class="key">drag_interp</span></label><select id="dragInterp"><option value="RP">RP (original blob model, report scheme)</option><option value="OESCUI">OESCUI (shielded-blob, smooth blend)</option><option value="OESI">OESI (shielded-blob, piecewise)</option><option value="BARECUI">BARECUI (bare-blob, smooth blend)</option><option value="BAREI">BAREI (bare-blob, piecewise)</option><option value="CU">CU (legacy Churchill–Usagi blend, experimental)</option></select></div>
+        <div class="help"><b>RP</b> is the scheme of the technical report and reproduces the published results (the default). The <b>bare-blob</b> model (BAREI / BARECUI) uses the bare Kirkwood–Riseman draining of the tension and correlation blobs; the <b>shielded-blob</b> model (OESI / OESCUI) adds overlap-enhanced shielding of the hydrodynamic interactions. The <i>CUI</i> variants join the weakly and strongly screened limits with a Churchill–Usagi blend of exponent p<sub>φ</sub>; the <i>I</i> variants switch between them. Only the C2D2 drag model uses this setting.</div></div>
+      <div class="field" id="pphiField"><div class="row"><label>Blend exponent <span class="key">p_phi</span></label><input type="number" id="pphi" step="any" min="0"/></div>
+        <div class="help">Written only for OESCUI, BARECUI and CU. The default is 2 for the CUI schemes and 1.86 for CU (the fit to Martin's correlation at rest). Must be positive.</div></div>
+      <div class="field" id="qoesField"><div class="row"><label>Shielding delay exponent <span class="key">q_oes</span></label><input type="number" id="qoes" step="any" min="0"/></div>
+        <div class="help">Written only for OESI and OESCUI. The overlap dressing is ψ = min(φ/E<sup>q</sup>, 1): with 0 (default) the shielding is set by the overlap alone; 0.25 delays it as the chain stretches (stretch-delayed shielding).</div></div>
+      <div class="field"><div class="row"><label>Time limit per run [s] <span class="key">max_wall_s</span></label><input type="number" id="maxwall" step="1"/></div></div>
+    </details>
+  </div>
+
+  <div class="card">
+    <h2>Job scripts</h2>
+    <div class="sub">Both scripts are written into the run folder. Use whichever suits the machine.</div>
+    <div class="field"><div class="row"><label>Local runs in parallel</label><input type="number" id="nproc" step="1" min="1" value="1"/></div>
+      <div class="help"><code>bash run_local.sh</code> runs everything one after another in a single Julia session (the code is compiled only once). <code>bash run_local.sh 4</code> runs four inputs at a time.</div></div>
+    <div class="field"><div class="row"><label>SLURM account</label><input type="text" id="sacct" placeholder="(optional)"/></div></div>
+    <div class="field"><div class="row"><label>SLURM partition</label><input type="text" id="spart" placeholder="(optional)"/></div></div>
+    <div class="field"><div class="row"><label>Time per task</label><input type="text" id="stime" value="01:00:00"/></div></div>
+    <div class="field"><div class="row"><label>Memory per task</label><input type="text" id="smem" value="4G"/></div></div>
+    <div class="field"><div class="row"><label>Lines before the run</label></div>
+      <input type="text" class="wide" id="spre" placeholder="e.g. module load julia/1.11"/>
+      <div class="help"><code>sbatch job.slurm</code> submits an array job with one task per input.</div></div>
+  </div>
+</div>
+
+<div>
+  <div class="card" style="position:sticky;top:12px">
+    <h2>What will be written</h2>
+    <div id="summary" class="help"></div>
+    <div id="problems"></div>
+    <div class="tablewrap"><table class="runs" id="runTable"></table></div>
+    <div class="btnrow" style="margin-top:10px">
+      <button class="btn" id="btnFolder" onclick="writeFolder()">Create run folder…</button>
+      <button class="btn sec" onclick="downloadZip()">⬇ Download as .zip</button>
+    </div>
+    <div class="help" id="fsNote"></div>
+    <div id="writeMsg"></div>
+    <div class="subtabs" id="fileTabs"></div>
+    <pre class="code" id="filePreview"></pre>
+  </div>
+</div>
+</div>
+</main>
+
+<!-- ============================ VIEW ============================ -->
+<main id="panel-view" class="hidden">
+  <div class="card">
+    <h2>Open a run folder</h2>
+    <div class="sub">Pick the folder this page created (the one holding <code>sweep.json</code>, <code>inputs/</code> and <code>outputs/</code>). You can open it while the runs are still going: finished runs are plotted, the rest are listed as pending.</div>
+    <button class="btn" id="btnOpen" onclick="openFolder()">Open run folder…</button>
+    <button class="btn sec" id="btnReload" onclick="reloadFolder()" disabled>↻ Reload</button>
+    <label class="help" style="margin-left:6px"><input type="checkbox" id="autoReload" onchange="setAuto()"/> reload every 30 s</label>
+    <div class="help" id="openAlt">Or choose the folder here (works in every browser, but cannot reload): <input type="file" id="dirInput" webkitdirectory directory multiple/></div>
+    <div id="loadMsg" class="help"></div>
+  </div>
+  <div id="viewBody" class="hidden">
+    <div class="card">
+      <h2 id="vTitle"></h2>
+      <div id="vFixed" class="help"></div>
+      <div class="ctl">
+        time axis <select id="xaxis" onchange="drawAll()">
+          <option value="tl">t/λ₁</option><option value="tv">t/t_v</option><option value="eps">Hencky strain ε</option><option value="ts">t [s]</option></select>
+        <span>λ₁ [s] <input type="number" id="lam1s" step="any" onchange="drawAll()"/></span>
+        <span>breakup when R/R₀ &lt; <input type="number" id="rbreak" value="2e-5" step="any" onchange="drawAll()"/></span>
+      </div>
+      <div class="ctl">
+        experiment (CSV of time [s], D [mm]) <input type="file" id="expFile" accept=".csv,.txt"/>
+        D₀ [mm] <input type="number" id="expD0" step="any" onchange="drawAll()"/>
+        time shift [s] <input type="number" id="expShift" value="0" step="any" onchange="drawAll()"/>
+        <span id="expMsg"></span>
+      </div>
+      <div class="tablewrap"><table class="runs" id="featTable"></table></div>
+      <button class="btn sec" onclick="downloadFeatures()">⬇ Features as CSV</button>
+      <div class="help">Onset (▲) is the first local maximum of Wi after the start, the end of the solvent-dominated stage. The elastic point (●) is the minimum of Wi that follows. t<sub>*</sub>, ε<sub>*</sub> mark the moment the polymer stress first matches the solvent stress. Where Wi has no overshoot, the elastic point is just the minimum of Wi. Breakup is when R/R₀ falls below the threshold, or when the chains reach the stretch cap and the run stops, whichever comes first.</div>
+    </div>
+    <div class="plotgrid">
+      <div class="plotwrap"><h3>Filament radius</h3><div class="plot" id="pR"></div></div>
+      <div class="plotwrap"><h3>Weissenberg number Wi = ε̇λ₁</h3><div class="plot" id="pW"></div></div>
+      <div class="plotwrap"><h3>Who carries the capillary stress</h3><div class="help">polymer N<sub>p</sub>/N<sub>cap</sub> (solid) and solvent N<sub>v</sub>/N<sub>cap</sub> (dashed)</div><div class="plot" id="pF"></div></div>
+      <div class="plotwrap"><h3>Chain stretch M and polymer viscosity η̃<sub>p</sub></h3><div class="help">M (solid), η̃<sub>p</sub> (dashed)</div><div class="plot" id="pM"></div></div>
+      <div class="plotwrap"><h3>η̃<sub>p</sub> vs Wi, with the steady curve</h3><div class="help">transient (solid), steady extension (dotted)</div><div class="plot" id="pEW"></div></div>
+      <div class="plotwrap"><h3>M vs Wi, with the steady curve</h3><div class="help">transient (solid), steady extension (dotted)</div><div class="plot" id="pMW"></div></div>
+      <div class="plotwrap" style="grid-column:1/-1"><h3>Features across the sweep</h3>
+        <div class="ctl">plot <select id="featSel" onchange="drawFeat()"></select> <label><input type="checkbox" id="featLogX" checked onchange="drawFeat()"/> log x</label> <label><input type="checkbox" id="featLogY" onchange="drawFeat()"/> log y</label></div>
+        <div class="plot" id="pFeat"></div></div>
+    </div>
+  </div>
+</main>
+
+<!-- ============================ HELP ============================ -->
+<main id="panel-help" class="hidden"><div class="card doc" id="helpDoc">
+<p>This page sets up capillary-thinning (CaBER) simulations with the C2D2 model, writes a self-contained run folder with job scripts, and plots the results. With it you can sweep one of N<sub>K</sub>, φ, h*<sub>K</sub>, De or the prestretch ε<sub>0</sub> while the other parameters stay fixed. For each distinct fluid (N<sub>K</sub>, φ, h*<sub>K</sub>), the matching steady uniaxial-extension curve is computed as well, so every transient trajectory can be read against its steady-state attractor.</p>
+<h2>1. One-time installation (about an hour)</h2>
+<ol>
+<li>
+<p><strong>Install Julia 1.9 or newer.</strong> The simplest route is juliaup:</p>
+<ul>
+<li>macOS / Linux: <code>curl -fsSL https://install.julialang.org | sh</code></li>
+<li>Windows: <code>winget install --name Julia --id 9NJNWW8PVKMN -e -s msstore</code></li>
+</ul>
+<p>Open a new terminal and check that <code>julia --version</code> works.
+2. <strong>Get the code:</strong>
+<code>git clone https://github.com/prabhakarranganathan/C2D2.jl.git</code>
+Note the full path of the folder you get. The page asks for it.
+3. <strong>Check the code runs:</strong> <code>cd C2D2.jl</code> and then <code>julia julia/examples/run_usyext_example.jl</code>. It takes about a minute the first time, because Julia compiles the code. The solver uses only Julia's standard library, so there are no packages to install.
+4. <strong>Open <code>c2d2_caber_toolkit.html</code></strong> in a browser. Chrome or Edge can write the run folder directly; Safari and Firefox download it as a zip instead. The page loads two small libraries from a CDN (Plotly for the plots, JSZip for the zip), so it needs an internet connection; “Create run folder…” works without them.</p>
+</li>
+</ol>
+<h2>2. Setting up a sweep (tab ①)</h2>
+<ul>
+<li>Give the sweep a <strong>run tag</strong>. The run folder is named <code>&lt;tag&gt;_&lt;date&gt;_&lt;time&gt;</code>, so nothing is ever overwritten.</li>
+<li>Pick a <strong>preset</strong> (the PS-in-DEP solutions of Clasen et al. 2006, with the parameter values we use) or type your own values. The De helper turns your λ<sub>1</sub>, η<sub>s</sub>, σ and R<sub>0</sub> into De.</li>
+<li>Choose the <strong>sweep parameter</strong>, then give its values as a list or as a range. The swept field is greyed out in the form.</li>
+<li>Fill in <strong>where C2D2.jl lives</strong> and, for a cluster, the SLURM settings.</li>
+<li>The right-hand panel lists every run that will be written and previews each file. Then either <strong>Create run folder…</strong> (you choose the folder it goes in) or <strong>Download as .zip</strong>.</li>
+</ul>
+<h2>3. Running</h2>
+<p>Open a terminal <strong>inside the run folder</strong>:</p>
+<table>
+<thead>
+<tr>
+<th>What</th>
+<th>Command</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>everything, one after another, in one Julia session</td>
+<td><code>bash run_local.sh</code></td>
+</tr>
+<tr>
+<td>four inputs at a time</td>
+<td><code>bash run_local.sh 4</code></td>
+</tr>
+<tr>
+<td>on a SLURM cluster (one array task per input)</td>
+<td><code>sbatch job.slurm</code></td>
+</tr>
+<tr>
+<td>redo runs that already finished</td>
+<td><code>bash run_local.sh 1 --force</code></td>
+</tr>
+<tr>
+<td>one input by hand</td>
+<td><code>julia c2d2_run.jl /path/to/C2D2.jl inputs/caber_03_phi6.toml</code></td>
+</tr>
+</tbody>
+</table>
+<p>Finished runs are skipped, so you can stop and restart at any time. The steady runs are quick and go first. A single-mode CaBER run takes seconds and a 100-mode run takes a few minutes, plus about 30 s at the start of each Julia session for compilation. On Windows without <code>bash</code>, run <code>julia c2d2_run.jl C:\path\to\C2D2.jl inputs</code> from the run folder.</p>
+<h2>4. Looking at the results (tab ②)</h2>
+<p><strong>Open run folder…</strong> shows what has finished so far. <strong>↻ Reload</strong>, or <em>reload every 30 s</em>, picks up runs as they complete, so you can watch a sweep while it runs. (Safari and Firefox can open a folder once but cannot reload it.) The plots are:</p>
+<ul>
+<li>R/R<sub>0</sub>, Wi, the share of the capillary stress carried by the polymer and by the solvent, and M and η̃<sub>p</sub>, all against t/λ<sub>1</sub>, t/t<sub>v</sub>, Hencky strain, or t in seconds once λ<sub>1</sub> is given;</li>
+<li>the trajectories in the η̃<sub>p</sub>–Wi and M–Wi planes, with the steady-extension curve dotted;</li>
+<li>a feature table (below), downloadable as CSV, and any feature plotted against the sweep parameter.</li>
+</ul>
+<p>The folder <code>example_PSDEP_phi_sweep</code> that comes with the toolkit is a finished single-mode φ sweep for the 2.8 M PS-DEP chains; open it in tab ② to see what the viewer shows.</p>
+<p>You can overlay an experiment on the R/R<sub>0</sub> plot. Load a two-column CSV of time [s] and filament diameter [mm], and give D<sub>0</sub>, λ<sub>1</sub> [s] and, if needed, a time shift.</p>
+<p><strong>Features of each CaBER run</strong> (times in units of λ<sub>1</sub>):</p>
+<table>
+<thead>
+<tr>
+<th>feature</th>
+<th>meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Wi(0)</td>
+<td>Wi at the start; Wi(0) = (2X<sub>v</sub>−1)De/3 for an equilibrium start</td>
+</tr>
+<tr>
+<td>t*, ε*</td>
+<td>when the polymer stress first equals the solvent stress</td>
+</tr>
+<tr>
+<td>onset t, onset Wi</td>
+<td>first local maximum of Wi after the start: the end of the solvent-dominated stage</td>
+</tr>
+<tr>
+<td>Wi<sub>e</sub>, t<sub>e</sub></td>
+<td>the minimum of Wi after the onset (the elastic point), searched up to 60% of the final strain; with no overshoot, simply the minimum of Wi</td>
+</tr>
+<tr>
+<td>t<sub>break</sub></td>
+<td>when R/R<sub>0</sub> first falls below the breakup threshold (default 2×10⁻⁵, editable), or when the chains reach the stretch cap and the run stops (finite extensibility), whichever comes first</td>
+</tr>
+</tbody>
+</table>
+<h2>5. The run folder</h2>
+<pre class="code"><code>&lt;tag&gt;_&lt;date&gt;_&lt;time&gt;/
+  sweep.json        fixed parameters, swept parameter and values, list of runs (read by the viewer)
+  runs.csv          one line per run: parameters, input file, output folder
+  README.txt        short description of this sweep
+  c2d2_run.jl       the driver: runs inputs, writes outputs/&lt;id&gt;/
+  run_local.sh      run on this machine
+  job.slurm         SLURM array job
+  inputs/           styext_*.toml (steady extension) and caber_*.toml (CaBER), one per run
+  outputs/&lt;id&gt;/     summary.csv, caber_diag.csv (CaBER only), input.toml, status.json
+  logs/
+</code></pre>
+<p><code>status.json</code> records <code>ok</code>, <code>failed</code> (with the error message) or <code>running</code>, the wall time and the number of output points.</p>
+<h2>6. Units and definitions</h2>
+<p>The code is written in dimensionless form. λ<sub>1</sub> (= <code>lambda0</code> = 1) is the longest relaxation time of the solution, and t<sub>v</sub> = η<sub>s</sub>R<sub>0</sub>/σ is the solvent viscocapillary time.</p>
+<ul>
+<li><strong>De</strong> = λ<sub>1</sub>/t<sub>v</sub>. Time <code>t</code> in the outputs is in units of t<sub>v</sub>, so <strong>t/λ<sub>1</sub> = t/De</strong>.</li>
+<li><strong>Wi</strong> = ε̇λ<sub>1</sub>, with ε̇ = −2 d ln R/dt the strain rate at the neck.</li>
+<li><strong>Hencky strain</strong> ε = 2 ln(R<sub>0</sub>/R).</li>
+<li><strong>M</strong> is the mean-square stretch of the chain relative to equilibrium. The column <code>E2</code> = Σ<sub>p</sub> S<sub>p</sub> tr <strong>M</strong><sub>p</sub> equals N<sub>m</sub> at equilibrium, so M = <code>E2</code>/N<sub>m</sub>; the viewer plots M.</li>
+<li><strong>η̃<sub>p</sub></strong> (column <code>etaE1</code>) is the polymer contribution to the extensional viscosity, scaled with n k<sub>B</sub>T λ<sub>1</sub>, where n is the number density of chains. Stresses <code>tau_*</code> are the polymer stress scaled with n k<sub>B</sub>T, in the solver's sign convention (negative in tension).</li>
+<li>The mid-filament stress balance is 3Wi = (2X−1)De/R + K̃ N<sub>1,p</sub>. In terms of the output columns this reads <code>viscstress = capstress + polystress</code>, where <code>viscstress</code> = 3Wi is the solvent stress, <code>capstress</code> = (2X−1)De/R is the capillary stress and <code>polystress</code> = K̃N<sub>1,p</sub> is the polymer term. In the solver's sign convention <code>polystress</code> is negative in tension, so −<code>polystress</code> is the polymer's tensile stress. K̃ (column <code>K_til</code>) = U<sub>1</sub>φ weighs polymer stress against solvent stress, with U<sub>1</sub> = U<sub>Z</sub>λ<sub>1</sub>/λ<sub>Z</sub>.</li>
+</ul>
+<h3>Output columns</h3>
+<p><strong><code>outputs/caber_*/summary.csv</code></strong></p>
+<table>
+<thead>
+<tr>
+<th>column</th>
+<th>meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>idx</td>
+<td>row number</td>
+</tr>
+<tr>
+<td>estrain</td>
+<td>Hencky strain ε = 2 ln(R<sub>0</sub>/R)</td>
+</tr>
+<tr>
+<td>t</td>
+<td>time / t<sub>v</sub></td>
+</tr>
+<tr>
+<td>tWi_ref</td>
+<td>unused (NaN)</td>
+</tr>
+<tr>
+<td>Wi</td>
+<td>ε̇λ<sub>1</sub></td>
+</tr>
+<tr>
+<td>De</td>
+<td>λ<sub>1</sub>/t<sub>v</sub> (constant)</td>
+</tr>
+<tr>
+<td>E2</td>
+<td>Σ<sub>p</sub> S<sub>p</sub> tr <strong>M</strong><sub>p</sub>; equals N<sub>m</sub> at equilibrium, and M = E2/N<sub>m</sub></td>
+</tr>
+<tr>
+<td>etaE1, etaE2</td>
+<td>η̃<sub>p</sub> from τ<sub>zz</sub>−τ<sub>xx</sub> and τ<sub>zz</sub>−τ<sub>yy</sub> (equal in uniaxial flow)</td>
+</tr>
+<tr>
+<td>Tr1, Tr2</td>
+<td>polymer Trouton ratios, η̃<sub>p</sub> n k<sub>B</sub>T λ<sub>1</sub>/(3η<sub>s</sub>)</td>
+</tr>
+<tr>
+<td>tau_xx, tau_yy, tau_zz</td>
+<td>polymer stress / n k<sub>B</sub>T, negative in tension (z is the filament axis)</td>
+</tr>
+<tr>
+<td>status</td>
+<td>ok, or terminated where the run stopped early (stretch cap or time limit)</td>
+</tr>
+</tbody>
+</table>
+<p><strong><code>outputs/caber_*/caber_diag.csv</code></strong></p>
+<table>
+<thead>
+<tr>
+<th>column</th>
+<th>meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>idx, estrain, t, Wi, De</td>
+<td>as above</td>
+</tr>
+<tr>
+<td>R</td>
+<td>filament radius R/R<sub>0</sub></td>
+</tr>
+<tr>
+<td>X</td>
+<td>the slender-filament geometry factor in (2X−1)/R, which moves from X<sub>v</sub> ≈ 0.713 (viscous) towards X<sub>e</sub> = 3/2 (elastic)</td>
+</tr>
+<tr>
+<td>N1_p</td>
+<td>polymer normal-stress difference in the solver's sign convention</td>
+</tr>
+<tr>
+<td>K_til</td>
+<td>K̃ = U<sub>1</sub>φ</td>
+</tr>
+<tr>
+<td>capstress</td>
+<td>capillary stress (2X−1)De/R</td>
+</tr>
+<tr>
+<td>polystress</td>
+<td>polymer term K̃ N1_p (negative in tension)</td>
+</tr>
+<tr>
+<td>viscstress</td>
+<td>solvent stress, 3Wi</td>
+</tr>
+</tbody>
+</table>
+<p><strong><code>outputs/styext_*/summary.csv</code></strong> (steady uniaxial extension)</p>
+<table>
+<thead>
+<tr>
+<th>column</th>
+<th>meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>idx</td>
+<td>point along the continuation</td>
+</tr>
+<tr>
+<td>E2</td>
+<td>as above, at steady state</td>
+</tr>
+<tr>
+<td>Wi</td>
+<td>ε̇λ<sub>1</sub></td>
+</tr>
+<tr>
+<td>etaE1, etaE2, Tr1, Tr2, tau_*</td>
+<td>as for CaBER, at steady state</td>
+</tr>
+<tr>
+<td>Wi_pole, newton_iters, ds, FY_rel</td>
+<td>continuation diagnostics</td>
+</tr>
+<tr>
+<td>status</td>
+<td><code>eq</code> (equilibrium point), <code>FY-cnv</code> or <code>PAC-cnv</code> (the solver branch that converged)</td>
+</tr>
+</tbody>
+</table>
+<p>The viewer uses the rows with Wi &gt; 0. Where the steady curve folds back (coil–stretch hysteresis), several M values share the same Wi.</p>
+<h2>7. Notes</h2>
+<ul>
+<li>With <strong>N<sub>m</sub> &gt; 1</strong> the default (<code>blob</code>) relaxation spectrum lets each mode cross over from Zimm to Rouse as the chain stretches and the solution crowds. This multimode spectrum has not yet been through peer review. The pure Rouse and Zimm scalings are offered as checks.</li>
+<li>A <strong>prestretch</strong> ε<sub>0</sub> is applied affinely to every mode. With more than one mode the fast modes then start far from equilibrium, which is not physical, so we use prestretch with the single-mode model only.</li>
+<li>Every key the page writes is read by the C2D2.jl v1.0.0 input readers (<code>StyextRunContext.jl</code>, <code>UsyextRunContext.jl</code>). The inputs are plain TOML and can be edited by hand.</li>
+<li>Problems, questions: Prabhakar Ranganathan, prabhakar.ranganathan@monash.edu.</li>
+</ul>
+</div></main>
+
+<script type="text/plain" id="driverSrc">
+# c2d2_run.jl - run the C2D2 inputs of one sweep folder.
+#
+# Written into every run folder by the C2D2 CaBER toolkit page. Needs only Julia
+# (>= 1.9) and a copy of C2D2.jl; it uses nothing beyond the Julia standard library.
+#
+#   julia c2d2_run.jl <path to C2D2.jl> [inputs | file.toml ...] [--force]
+#
+#   <path to C2D2.jl>  the cloned repository (the folder that contains julia/models)
+#   inputs             a folder: every *.toml in it is run (steady runs first)
+#   file.toml ...      or one or more input files
+#   --force            re-run inputs whose outputs already say "ok"
+#
+# Each input  inputs/<id>.toml  writes to  outputs/<id>/ :
+#   summary.csv      the solver's summary (all runs)
+#   caber_diag.csv   the CaBER stress balance (CaBER runs only)
+#   input.toml       a copy of the input
+#   status.json      ok / failed, wall time, number of points, error message
+#
+# The kind of run (steady extension or CaBER) is read from [flow] kind.
+
+const ARGS_ = copy(ARGS)
+force = "--force" in ARGS_
+filter!(a -> a != "--force", ARGS_)
+length(ARGS_) >= 1 || error("usage: julia c2d2_run.jl <path to C2D2.jl> [inputs | file.toml ...] [--force]")
+
+root = abspath(expanduser(ARGS_[1]))
+models = isdir(joinpath(root, "julia", "models")) ? joinpath(root, "julia", "models") :
+         isdir(joinpath(root, "models")) ? joinpath(root, "models") :
+         error("Cannot find julia/models under $root - is this the C2D2.jl folder?")
+
+const RUNDIR = @__DIR__
+
+for f in ("kernel/Fene.jl", "kernel/Drag.jl", "kernel/Spectrum.jl", "kernel/CoeffsRelax.jl",
+          "kernel/evals/Stress.jl", "kernel/evals/StateObs.jl",
+          "kernel/flows/StyextFlows.jl", "kernel/flows/UsyextFlows.jl",
+          "kernel/modelpacks/StyextModelPack.jl",
+          "numerics/StyextNewton.jl", "numerics/StyextManifold.jl", "numerics/UsyextIntegrator.jl",
+          "front_end/StyextRunContext.jl", "front_end/UsyextRunContext.jl")
+    include(joinpath(models, f))
+end
+
+import TOML
+using Printf
+using Dates
+
+# ---------------------------------------------------------------- which files
+targets = ARGS_[2:end]
+isempty(targets) && (targets = [joinpath(RUNDIR, "inputs")])
+files = String[]
+for t in targets
+    p = isabspath(t) ? t : (ispath(t) ? abspath(t) : joinpath(RUNDIR, t))
+    if isdir(p)
+        append!(files, sort(filter(x -> endswith(x, ".toml"), readdir(p; join=true))))
+    elseif isfile(p)
+        push!(files, p)
+    else
+        @warn "Not found, skipped: $t"
+    end
+end
+kindof(f) = lowercase(String(get(get(TOML.parsefile(f), "flow", Dict()), "kind", "caber")))
+sort!(files; by = f -> (kindof(f) == "styext" ? 0 : 1, basename(f)))   # steady runs are cheap: do them first
+isempty(files) && error("No input files to run.")
+
+jstr(s) = "\"" * replace(string(s), "\\" => "\\\\", "\"" => "\\\"", "\n" => " ") * "\""
+function write_status(dir, d)
+    open(joinpath(dir, "status.json"), "w") do io
+        println(io, "{", join(["$(jstr(k)): $(v isa AbstractString ? jstr(v) : v)" for (k, v) in d], ", "), "}")
+    end
+end
+
+println(@sprintf("C2D2 run: %d input(s), C2D2.jl at %s", length(files), root))
+nfail = 0
+for (k, f) in enumerate(files)
+    id = splitext(basename(f))[1]
+    outdir = joinpath(RUNDIR, "outputs", id)
+    st = joinpath(outdir, "status.json")
+    if !force && isfile(st) && occursin("\"ok\"", read(st, String))
+        println(@sprintf("[%d/%d] %-28s already done (use --force to redo)", k, length(files), id))
+        continue
+    end
+    mkpath(outdir)
+    cp(f, joinpath(outdir, "input.toml"); force=true)
+    kind = kindof(f)
+    write_status(outdir, ["status" => "running", "kind" => kind, "started" => string(now())])
+    t0 = time()
+    try
+        if kind == "styext"
+            params, mp_ctx, solver_opts, man_opts = StyextRunContext.load_styext_context(f)
+            traj = StyextManifold.build_manifold(mp_ctx, solver_opts, man_opts)
+            StyextManifold.write_summary_csv(joinpath(outdir, "summary.csv"), traj)
+        else
+            ctx, flow, plan, tol = UsyextRunContext.load_usyext_context(f)
+            M0 = UsyextRunContext.build_initial_M(f, ctx)
+            traj = UsyextIntegrator.integrate_usyext(ctx, flow, plan, tol; M0 = M0)
+            UsyextIntegrator.write_summary_csv(joinpath(outdir, "summary.csv"), traj)
+            UsyextIntegrator.write_caber_diag_csv(joinpath(outdir, "caber_diag.csv"), traj)
+        end
+        dt = time() - t0
+        write_status(outdir, ["status" => "ok", "kind" => kind, "wall_s" => round(dt; digits=2),
+                              "n_points" => length(traj), "finished" => string(now())])
+        println(@sprintf("[%d/%d] %-28s ok      %5d pts  %8.1f s", k, length(files), id, length(traj), dt))
+    catch e
+        global nfail += 1
+        dt = time() - t0
+        msg = sprint(showerror, e)
+        write_status(outdir, ["status" => "failed", "kind" => kind, "wall_s" => round(dt; digits=2),
+                              "error" => first(msg, 400), "finished" => string(now())])
+        println(@sprintf("[%d/%d] %-28s FAILED  after %.1f s: %s", k, length(files), id, dt, first(msg, 200)))
+    end
+end
+println(nfail == 0 ? "All done." : "Done, with $nfail failed run(s): see outputs/<id>/status.json")
+
+</script>
+
+<script>
+/* =====================================================================
+   presets and parameter metadata
+   ===================================================================== */
+const PRESETS = [
+ // sample, Mw, NK, ppm, phi, De (= lambda1/t_v), lambda1 [s]
+ ["X1",8.3e6,11186,100,0.063926,29.70332,0.010412],["X2",8.3e6,11186,316,0.202007,31.25114,0.010955],
+ ["X3",8.3e6,11186,1000,0.639262,36.70500,0.012866],["X4",8.3e6,11186,3160,2.020068,61.00056,0.021383],
+ ["X5",8.3e6,11186,10000,6.392619,185.4686,0.065013],
+ ["Y1",5.7e6,7682,100,0.049354,16.55887,0.0058044],["Y2",5.7e6,7682,316,0.155959,17.22117,0.0060366],
+ ["Y3",5.7e6,7682,1000,0.49354,19.49833,0.0068348],["Y4",5.7e6,7682,3160,1.559586,28.86141,0.010117],
+ ["Y5",5.7e6,7682,10000,4.935399,80.25421,0.028132],["Y6",5.7e6,7682,20000,9.870799,160.5084,0.056264],
+ ["Z1",2.8e6,3774,10000,3.010168,14.59857,0.0051173],["Z2",2.8e6,3774,14000,4.214235,20.43800,0.0071642],
+ ["Z3",2.8e6,3774,20000,6.020336,29.19714,0.010235],["Z4",2.8e6,3774,30000,9.030505,43.79571,0.015352]];
+const SWEEPS = [["none","no sweep"],["NK","N<sub>K</sub>"],["phi","φ"],["hK","h*<sub>K</sub>"],["De","De"],["eps0","ε<sub>0</sub>"]];
+const SKEY = {NK:"NK",phi:"phi",hK:"hK",De:"De",eps0:"eps0"};
+const DEFAULTS = {NK:3774,phi:3.010168,hK:0.015,Nm:1,De:14.59857,eps0:0,strain_max:25,dstrain_out:0.01,maxfrac:0.95,Wi_max:3,maxwall:3600,pphi:2,qoes:0};
+const PPHI_DEFAULT = s=>s==="CU"?1.86:2;
+const NEEDS_PPHI = s=>["CU","OESCUI","BARECUI"].includes(s);
+const IS_OES = s=>["OESI","OESCUI"].includes(s);
+let lastDragInterp = null;
+const LS = (k,v)=>{ try{ if(v===undefined) return localStorage.getItem(k); localStorage.setItem(k,v);}catch(e){ return null; } };
+const $ = id=>document.getElementById(id);
+
+function showTab(t){ for(const k of ["setup","view","help"]){ $("panel-"+k).classList.toggle("hidden",k!==t); $("tab-"+k).classList.toggle("active",k===t); } if(t==="view") setTimeout(()=>document.querySelectorAll(".plot").forEach(d=>{ if(d.data && window.Plotly) Plotly.Plots.resize(d); }),50); }
+
+/* ============================ number formatting ============================ */
+function g(v,p=7){ if(!isFinite(v)) return String(v); const s=String(Number(Number(v).toPrecision(p))); return s; }
+function tomlNum(v){ let s=g(v); if(/^-?\d+$/.test(s)) s+=".0"; return s.replace("e+","e"); }
+function tomlInt(v){ return String(Math.round(v)); }
+function short(v){ return String(Number(Number(v).toPrecision(4))); }
+
+/* ============================ setup state ============================ */
+function initSetup(){
+  const ps=$("preset"); ps.innerHTML=`<option value="">custom</option>`+PRESETS.map(p=>`<option value="${p[0]}">PS-DEP ${p[0]}: ${p[1]/1e6} M, ${p[3]} ppm (φ = ${short(p[4])})</option>`).join("");
+  ps.value="Z1";
+  for(const [k,v] of Object.entries(DEFAULTS)) $(k).value=v;
+  $("sweepRadios").innerHTML=SWEEPS.map(([k,l],i)=>`<label><input type="radio" name="sweep" value="${k}" ${k==="phi"?"checked":""}/><span>${l}</span></label>`).join("");
+  $("vlist").value="1.5, 3, 6, 9";
+  const r=LS("c2d2root"); if(r) $("c2d2root").value=r;
+  const j=LS("c2d2julia"); if(j) $("juliacmd").value=j;
+  document.querySelectorAll("#panel-setup input, #panel-setup select").forEach(el=>{ if(el.id!=="preset") el.addEventListener("input",update); el.addEventListener("change",update); });
+  ps.addEventListener("change",applyPreset);
+  const fs = ("showDirectoryPicker" in window);
+  $("btnFolder").disabled=!fs;
+  $("fsNote").innerHTML = fs ? "“Create run folder…” asks you to choose the folder in which the run folder is made, and writes everything there directly."
+     : "This browser cannot write folders directly (Chrome and Edge can). Use “Download as .zip” and unzip it where you want the run to live.";
+  if(!fs){ $("btnOpen").disabled=true; $("autoReload").disabled=true; }
+  applyPreset();
+}
+function applyPreset(){
+  const p=PRESETS.find(x=>x[0]===$("preset").value); if(!p){ update(); return; }
+  $("NK").value=p[2]; $("phi").value=p[4]; $("De").value=p[5]; $("hK").value=0.015;
+  if($("tag").value==="my_sweep"||/^PSDEP_/.test($("tag").value)) $("tag").value="PSDEP_"+p[0];
+  update();
+}
+function calcDe(){
+  const l=+$("cl").value, e=+$("ce").value, s=+$("cs").value, r=+$("cr").value*1e-3;
+  if(!(l>0&&e>0&&s>0&&r>0)){ $("cout").textContent="fill in all four"; return; }
+  const tv=e*r/s, De=l/tv; $("De").value=g(De,6); $("cout").textContent=`t_v = ${g(tv,3)} s, De = ${g(De,4)}`; $("preset").value=""; update();
+}
+function sweepParam(){ return document.querySelector('input[name=sweep]:checked').value; }
+function sweepValues(){
+  const sp=sweepParam(); if(sp==="none") return [];
+  let vals=[];
+  if(document.querySelector('input[name=vmode]:checked').value==="list"){
+    vals=$("vlist").value.split(/[\s,;]+/).filter(s=>s.length).map(Number);
+  } else {
+    const a=+$("vfrom").value, b=+$("vto").value, n=Math.max(2,Math.round(+$("vn").value||2));
+    if($("vspace").value==="log"){ if(a>0&&b>0) for(let i=0;i<n;i++) vals.push(a*Math.pow(b/a,i/(n-1))); }
+    else for(let i=0;i<n;i++) vals.push(a+(b-a)*i/(n-1));
+  }
+  vals=vals.map(v=> sp==="NK"? Math.round(v) : Number(Number(v).toPrecision(6)));
+  return vals;
+}
+function readParams(){
+  const P={}; for(const k of ["NK","phi","hK","Nm","De","eps0","strain_max","dstrain_out","maxfrac","Wi_max","maxwall"]) P[k]=parseFloat($(k).value);
+  P.Nm=Math.round(P.Nm); P.spectrum=$("spectrum").value; P.fe=$("fe").value; P.drag=$("drag").value; P.dragInterp=$("dragInterp").value; P.pphi=parseFloat($("pphi").value); P.qoes=parseFloat($("qoes").value);
+  return P;
+}
+function stamp(){ const d=new Date(), z=n=>String(n).padStart(2,"0"); return `${d.getFullYear()}-${z(d.getMonth()+1)}-${z(d.getDate())}_${z(d.getHours())}${z(d.getMinutes())}${z(d.getSeconds())}`; }
+function safeTag(){ return ($("tag").value.trim()||"sweep").replace(/[^A-Za-z0-9._-]+/g,"_"); }
+
+/* build the run list: caber runs and the distinct steady runs they need */
+function buildPlan(){
+  const P=readParams(), sp=sweepParam(), vals=sweepValues();
+  const problems=[];
+  const chk=(c,m)=>{ if(!c) problems.push(m); };
+  const sweepNames={NK:"NK",phi:"phi",hK:"hK",De:"De",eps0:"eps0"};
+  for(const k of ["NK","phi","hK","De","eps0"]) if(k!==sp) chk(isFinite(P[k]),`${k} is empty`);
+  chk(P.Nm>=1,"Nm must be at least 1"); if(sp!=="NK") chk(P.NK>=2,"NK must be at least 2");
+  if(sp!=="phi") chk(P.phi>0,"φ must be positive"); if(sp!=="hK") chk(P.hK>0,"h*K must be positive");
+  if(sp!=="De") chk(P.De>0,"De must be positive"); if(sp!=="eps0") chk(P.eps0>=0,"ε0 cannot be negative");
+  if(NEEDS_PPHI(P.dragInterp)) chk(isFinite(P.pphi)&&P.pphi>0,"p_phi must be positive for the CU, OESCUI and BARECUI schemes");
+  if(IS_OES(P.dragInterp)) chk(isFinite(P.qoes)&&P.qoes>=0,"q_oes must be zero or positive for the OESI and OESCUI schemes");
+  if(sp!=="none"){ chk(vals.length>0,"give at least one sweep value"); chk(vals.every(v=>isFinite(v)),"a sweep value is not a number");
+    if(["NK","phi","hK","De"].includes(sp)) chk(vals.every(v=>v>0),"sweep values must be positive"); if(sp==="eps0") chk(vals.every(v=>v>=0),"ε0 cannot be negative");
+    chk(new Set(vals).size===vals.length,"a sweep value is repeated"); }
+  const list = sp==="none" ? [null] : vals;
+  const caber=[], sty=[], styKey=new Map();
+  const nd=Math.max(2,String(list.length).length);
+  list.forEach((v,i)=>{
+    const q={...P}; if(sp!=="none") q[sp]=v;
+    const key=[q.NK,q.phi,q.hK,q.Nm,q.spectrum,q.fe,q.drag,q.dragInterp,NEEDS_PPHI(q.dragInterp)?q.pphi:"",IS_OES(q.dragInterp)?q.qoes:"",q.Wi_max].join("|");
+    if(!styKey.has(key)){
+      const n=sty.length+1, lab=["NK","phi","hK"].includes(sp)?`_${sp}${short(v)}`:"";
+      const id=`styext_${String(n).padStart(nd,"0")}${lab}`;
+      styKey.set(key,id); sty.push({id,kind:"styext",q,sval:["NK","phi","hK"].includes(sp)?v:null});
+    }
+    const id=`caber_${String(i+1).padStart(nd,"0")}${sp==="none"?"":`_${sp}${short(v)}`}`;
+    caber.push({id,kind:"caber",q,sval:v,styext:styKey.get(key)});
+  });
+  return {P,sp,vals,caber,sty,problems};
+}
+
+/* ============================ file generators ============================ */
+const MODEL_BLOCK = (q)=>`[model]
+fe_model           = "${q.fe}"
+drag_model         = "${q.drag}"
+drag_interp        = "${q.dragInterp}"${NEEDS_PPHI(q.dragInterp)?`
+p_phi              = ${tomlNum(q.pphi)}`:""}${IS_OES(q.dragInterp)?`
+q_oes              = ${tomlNum(q.qoes)}`:""}
+draining_model     = "partialdraining"
+spectrum_model     = "${q.Nm>1?q.spectrum:"auto"}"
+weights_method     = "closed-form"
+n_interior         = "auto"
+n_per_decade       = 100
+write_drag_lut_csv = false
+assess_drag_mode   = "linear-kink"
+assess_drag_axis   = "log"
+assess_spec_mode   = "linear-kink"
+assess_spec_axis   = "log"
+kink_blend_width   = 0.03`;
+const POLY_BLOCK=(q)=>`[polymer]
+Q0_sq   = 1.0
+kBT     = 1.0
+lambda0 = 1.0          # all times are scaled with lambda_1 = lambda0 = 1
+NK      = ${tomlInt(q.NK)}
+Nm      = ${tomlInt(q.Nm)}
+hK_star = ${tomlNum(q.hK)}
+
+[concentration]
+phi = ${tomlNum(q.phi)}`;
+function head(r,plan,tag){ const sp=plan.sp;
+  return `# C2D2 ${r.kind==="caber"?"CaBER (capillary thinning)":"steady uniaxial extension"} input, written by the C2D2 CaBER toolkit
+# sweep "${tag}"${sp!=="none"&&r.sval!=null?`, ${sp} = ${g(r.sval)}`:""}${r.styext?`; steady curve: ${r.styext}`:""}
+# run with:  julia c2d2_run.jl <path to C2D2.jl> inputs/${r.id}.toml
+`; }
+function caberToml(r,plan,tag){ const q=r.q; const ps=q.eps0>0;
+  return head(r,plan,tag)+`
+[run]
+label = "${r.id}"
+
+${POLY_BLOCK(q)}
+
+${MODEL_BLOCK(q)}
+
+[flow]
+kind   = "caber"
+De     = ${tomlNum(q.De)}    # lambda_1 / t_v,  t_v = eta_s R0 / sigma
+alphas = [-0.5, -0.5, 1.0]
+
+[limits]
+max_frac_stretch_sq = ${tomlNum(q.maxfrac)}
+
+[integration]
+independent  = "auto"
+strain_max   = ${tomlNum(q.strain_max)}
+dstrain_init = 1e-3
+dstrain_min  = 1e-9
+dstrain_max  = 5e-2
+rtol         = 1e-7
+atol         = 1e-9
+Wi_min_strain_independent = 0.01
+max_wall_s   = ${tomlNum(q.maxwall)}
+dt_init      = 1e-3
+
+[output]
+sample_mode = "strain_grid"
+dstrain_out = ${tomlNum(q.dstrain_out)}
+
+[initial_condition]
+kind                = "${ps?"uniaxial_affine":"equilibrium"}"
+micro_affine_strain = ${tomlNum(q.eps0)}
+apply_to_modes      = "all"
+`; }
+function styToml(r,plan,tag){ const q=r.q;
+  return head(r,plan,tag)+`
+[run]
+label = "${r.id}"
+
+${POLY_BLOCK(q)}
+
+${MODEL_BLOCK(q)}
+
+[flow]
+kind   = "styext"
+alphas = [-0.5, -0.5, 1.0]
+
+[limits]
+Wi_max              = ${tomlNum(q.Wi_max)}
+max_frac_stretch_sq = 0.999
+
+[continuation]
+tol_root    = 1e-8
+max_it_root = 100
+max_steps   = 5000
+ds0     = 0.001
+ds_min  = 1e-8
+ds_max  = 100.0
+grow    = 1.5
+shrink  = 0.5
+
+[newton]
+tol_res        = 1e-8
+max_newton     = 15
+target_newton  = 10
+target_offmanifold_ratio = 0.3
+min_denom_tol  = 0.0
+tol_J_cond     = 1e-12
+use_armijo     = true
+armijo_c1      = 1e-4
+armijo_beta    = 0.5
+max_bt         = 30
+
+[newton_fixed_Y]
+max_newton_fixed_Y = 15
+tol_FY_abs      = 1e-10
+tol_FY_rel_hard = 100.0
+tol_FY_rel_soft = 1e-2
+`; }
+function runsCsv(plan){
+  const rows=["id,kind,NK,phi,hK_star,Nm,spectrum_model,De,eps0,sweep_param,sweep_value,styext_id,input,output_dir"];
+  for(const r of [...plan.sty,...plan.caber]){ const q=r.q;
+    rows.push([r.id,r.kind,q.NK,g(q.phi),g(q.hK),q.Nm,q.Nm>1?q.spectrum:"auto",r.kind==="caber"?g(q.De):"",r.kind==="caber"?g(q.eps0):"",plan.sp,r.sval==null?"":g(r.sval),r.styext||"",`inputs/${r.id}.toml`,`outputs/${r.id}`].join(",")); }
+  return rows.join("\n")+"\n";
+}
+function sweepJson(plan,tag,folder){
+  const pre=PRESETS.find(x=>x[0]===$("preset").value);
+  const fixed={NK:plan.P.NK,phi:plan.P.phi,hK_star:plan.P.hK,Nm:plan.P.Nm,spectrum_model:plan.P.Nm>1?plan.P.spectrum:"auto",De:plan.P.De,eps0:plan.P.eps0,fe_model:plan.P.fe,drag_model:plan.P.drag,drag_interp:plan.P.dragInterp,...(NEEDS_PPHI(plan.P.dragInterp)?{p_phi:plan.P.pphi}:{}),...(IS_OES(plan.P.dragInterp)?{q_oes:plan.P.qoes}:{}),strain_max:plan.P.strain_max};
+  if(plan.sp!=="none") delete fixed[{NK:"NK",phi:"phi",hK:"hK_star",De:"De",eps0:"eps0"}[plan.sp]];
+  return JSON.stringify({tool:"C2D2 CaBER toolkit",version:1,tag,folder,created:new Date().toISOString(),
+    preset:pre?{sample:pre[0],Mw:pre[1],ppm:pre[3],lambda1_s:pre[6]}:null,
+    fixed,sweep:{param:plan.sp,values:plan.vals},
+    runs:[...plan.sty,...plan.caber].map(r=>({id:r.id,kind:r.kind,sweep_value:r.sval,styext:r.styext||null,NK:r.q.NK,phi:r.q.phi,hK_star:r.q.hK,De:r.kind==="caber"?r.q.De:null,eps0:r.kind==="caber"?r.q.eps0:null}))},null,1)+"\n";
+}
+function runLocal(plan){
+  const root=$("c2d2root").value.trim()||"/path/to/C2D2.jl", jl=$("juliacmd").value.trim()||"julia";
+  return `#!/usr/bin/env bash
+# Run every input in this folder on this machine.
+#   bash run_local.sh        one after another, in one Julia session
+#   bash run_local.sh 4      four inputs at a time
+#   bash run_local.sh 1 --force    redo runs that already finished
+# Finished runs are skipped, so you can stop and restart at any time.
+cd "$(dirname "$0")"
+C2D2_ROOT="\${C2D2_ROOT:-${root}}"
+JULIA="\${JULIA:-${jl}}"
+NPROC="\${1:-${Math.max(1,Math.round(+$("nproc").value||1))}}"
+shift || true
+mkdir -p logs
+if [ "$NPROC" -le 1 ]; then
+  $JULIA --startup-file=no c2d2_run.jl "$C2D2_ROOT" inputs "$@" 2>&1 | tee logs/run_local.log
+else
+  # steady runs first (they are quick), then the CaBER runs
+  printf "%s\\n" inputs/styext_*.toml inputs/caber_*.toml | \\
+    xargs -P "$NPROC" -I{} sh -c '$0 --startup-file=no c2d2_run.jl "$1" "$2" $3 > "logs/$(basename "$2" .toml).log" 2>&1; grep -E "ok |FAILED|already done" "logs/$(basename "$2" .toml).log" | tail -n 1' "$JULIA" "$C2D2_ROOT" {} "$*"
+fi
+`; }
+function jobSlurm(plan){
+  const n=plan.sty.length+plan.caber.length, root=$("c2d2root").value.trim()||"/path/to/C2D2.jl", jl=$("juliacmd").value.trim()||"julia";
+  const a=$("sacct").value.trim(), p=$("spart").value.trim(), pre=$("spre").value.trim();
+  return `#!/bin/bash
+# Submit from inside this folder:   sbatch job.slurm
+# One array task per input file (steady runs first). Finished runs are skipped on resubmission.
+#SBATCH --job-name=c2d2_${safeTag()}
+#SBATCH --array=1-${n}
+#SBATCH --ntasks=1
+#SBATCH --cpus-per-task=1
+#SBATCH --time=${$("stime").value.trim()||"01:00:00"}
+#SBATCH --mem=${$("smem").value.trim()||"4G"}
+#SBATCH --output=logs/%x_%a.out
+${a?`#SBATCH --account=${a}\n`:""}${p?`#SBATCH --partition=${p}\n`:""}
+cd "\${SLURM_SUBMIT_DIR:-$(dirname "$0")}"
+mkdir -p logs
+${pre?pre+"\n":""}C2D2_ROOT="\${C2D2_ROOT:-${root}}"
+shopt -s nullglob
+FILES=( inputs/styext_*.toml inputs/caber_*.toml )
+F="\${FILES[$((SLURM_ARRAY_TASK_ID-1))]}"
+echo "task $SLURM_ARRAY_TASK_ID: $F"
+${jl} --startup-file=no c2d2_run.jl "$C2D2_ROOT" "$F"
+`; }
+function folderReadme(plan,tag,folder){
+  return `C2D2 CaBER sweep "${tag}"   (folder ${folder})
+Written by the C2D2 CaBER toolkit on ${new Date().toString()}.
+
+What is here
+  sweep.json      the sweep: fixed parameters, swept parameter and values, list of runs
+  runs.csv        one line per run: parameters, input file, output folder
+  inputs/         one TOML input per run (styext_* = steady extension, caber_* = CaBER)
+  c2d2_run.jl     runs the inputs (needs Julia >= 1.9 and a clone of C2D2.jl)
+  run_local.sh    run on this machine:  bash run_local.sh   (or  bash run_local.sh 4  for 4 at a time)
+  job.slurm       run on a SLURM cluster:  sbatch job.slurm
+  outputs/<id>/   results of each run, created as the runs finish
+  logs/           run logs
+
+Fixed: ${Object.entries(JSON.parse(sweepJson(plan,tag,folder)).fixed).map(([k,v])=>`${k} = ${v}`).join(", ")}
+Sweep: ${plan.sp==="none"?"none":`${plan.sp} = ${plan.vals.map(v=>g(v)).join(", ")}`}
+Runs : ${plan.sty.length} steady + ${plan.caber.length} CaBER
+
+To look at the results, open c2d2_caber_toolkit.html, go to "View results" and open this folder.
+The meaning of every output column is in the toolkit's "How to run / output files" tab and in its README.
+`; }
+function allFiles(plan,folder){
+  const tag=safeTag(), files={};
+  files["sweep.json"]=sweepJson(plan,tag,folder);
+  files["runs.csv"]=runsCsv(plan);
+  files["README.txt"]=folderReadme(plan,tag,folder);
+  files["run_local.sh"]=runLocal(plan);
+  files["job.slurm"]=jobSlurm(plan);
+  files["c2d2_run.jl"]=$("driverSrc").textContent.replace(/^\n/,"");
+  for(const r of plan.sty) files[`inputs/${r.id}.toml`]=styToml(r,plan,tag);
+  for(const r of plan.caber) files[`inputs/${r.id}.toml`]=caberToml(r,plan,tag);
+  return files;
+}
+
+/* ============================ setup UI refresh ============================ */
+let PLAN=null, previewName="sweep.json";
+function update(){
+  LS("c2d2root",$("c2d2root").value); LS("c2d2julia",$("juliacmd").value);
+  const sp=sweepParam();
+  for(const k of ["NK","phi","hK","De","eps0"]){ $(k).disabled=(k===sp); $(k).classList.toggle("swept",k===sp); }
+  $("sweepBox").classList.toggle("hidden",sp==="none");
+  const mode=document.querySelector('input[name=vmode]:checked').value;
+  $("listBox").classList.toggle("hidden",mode!=="list"); $("rangeBox").classList.toggle("hidden",mode!=="range");
+  const Nm=Math.round(+$("Nm").value||1);
+  $("specField").style.opacity = Nm>1?1:.5;
+  const di = $("dragInterp").value;
+  if(lastDragInterp!==null && di!==lastDragInterp && (!isFinite(parseFloat($("pphi").value)) || parseFloat($("pphi").value)===PPHI_DEFAULT(lastDragInterp))) $("pphi").value=PPHI_DEFAULT(di);
+  lastDragInterp = di;
+  const needP = NEEDS_PPHI(di), isOes = IS_OES(di);
+  $("pphiField").classList.toggle("hidden",!needP); $("pphi").disabled=!needP;
+  $("qoesField").classList.toggle("hidden",!isOes); $("qoes").disabled=!isOes;
+  const anyPS = (sp==="eps0" ? sweepValues().some(v=>v>0) : +$("eps0").value>0);
+  $("psWarn").classList.toggle("hidden",!(Nm>1&&anyPS));
+  PLAN=buildPlan();
+  $("vchips").innerHTML = sp==="none"?"": PLAN.vals.map(v=>`<span class="pill">${g(v)}</span>`).join("");
+  const n=PLAN.sty.length+PLAN.caber.length;
+  const est = PLAN.P.Nm<=1 ? "seconds each" : PLAN.P.Nm<=10 ? "about a minute each" : PLAN.P.Nm<=30?"one to two minutes each":"a few minutes each";
+  $("summary").innerHTML = `Folder <code>${safeTag()}_&lt;date&gt;_&lt;time&gt;/</code> with <b>${PLAN.caber.length}</b> CaBER run(s) and <b>${PLAN.sty.length}</b> steady run(s), ${n} inputs in all. CaBER runs with N<sub>m</sub> = ${PLAN.P.Nm} take ${est}, plus about 30 s for Julia to compile the code at the start of each session.`;
+  $("problems").innerHTML = PLAN.problems.length? `<div class="errbox">${PLAN.problems.join("<br>")}</div>`:"";
+  if(!$("c2d2root").value.trim()) $("problems").innerHTML+=`<div class="warnbox">Fill in where C2D2.jl lives, or set <code>C2D2_ROOT</code> when you run the scripts.</div>`;
+  const cols=["id","NK","φ","h*K","Nm","De","ε0","steady"];
+  $("runTable").innerHTML=`<tr>${cols.map(c=>`<th>${c}</th>`).join("")}</tr>`+
+    [...PLAN.sty,...PLAN.caber].map(r=>`<tr><td>${r.id}</td><td>${r.q.NK}</td><td>${g(r.q.phi,5)}</td><td>${g(r.q.hK,4)}</td><td>${r.q.Nm}</td><td>${r.kind==="caber"?g(r.q.De,5):"–"}</td><td>${r.kind==="caber"?g(r.q.eps0,4):"–"}</td><td>${r.styext||""}</td></tr>`).join("");
+  const files=allFiles(PLAN,`${safeTag()}_<date>_<time>`);
+  const names=Object.keys(files);
+  if(!names.includes(previewName)) previewName="sweep.json";
+  const show=["sweep.json","runs.csv","run_local.sh","job.slurm","README.txt",...names.filter(n=>n.startsWith("inputs/")).slice(0,6)];
+  $("fileTabs").innerHTML=show.map(n=>`<span class="subtab ${n===previewName?"active":""}" onclick="previewName='${n}';update()">${n.replace("inputs/","")}</span>`).join("")+(names.filter(n=>n.startsWith("inputs/")).length>6?`<span class="help" style="margin-left:6px">…and more inputs</span>`:"");
+  $("filePreview").textContent=files[previewName];
+  for(const b of [$("btnFolder")]) b.disabled = PLAN.problems.length>0 || !("showDirectoryPicker" in window);
+}
+
+/* ============================ writing the folder ============================ */
+async function writeFolder(){
+  if(PLAN.problems.length) return;
+  let parent; try{ parent=await window.showDirectoryPicker({id:"c2d2runs",mode:"readwrite"}); }catch(e){ return; }
+  const folder=`${safeTag()}_${stamp()}`;
+  try{
+    const dir=await parent.getDirectoryHandle(folder,{create:true});
+    const files=allFiles(PLAN,folder);
+    for(const [path,text] of Object.entries(files)) await writeText(dir,path,text);
+    await dir.getDirectoryHandle("outputs",{create:true}); await dir.getDirectoryHandle("logs",{create:true});
+    $("writeMsg").innerHTML=`<div class="okbox">Wrote <b>${folder}/</b> inside “${parent.name}” (${Object.keys(files).length} files). To run it, open a terminal in that folder and type <code>bash run_local.sh</code>, or <code>sbatch job.slurm</code> on a cluster. Then open it in <b>② View results</b>.</div>`;
+    VIEW.handle=dir; VIEW.name=folder; $("btnReload").disabled=false;
+  }catch(e){ $("writeMsg").innerHTML=`<div class="errbox">Could not write the folder: ${e.message}</div>`; }
+}
+async function writeText(dir,path,text){
+  const parts=path.split("/"); let d=dir;
+  for(const p of parts.slice(0,-1)) d=await d.getDirectoryHandle(p,{create:true});
+  const fh=await d.getFileHandle(parts.at(-1),{create:true}); const w=await fh.createWritable(); await w.write(text); await w.close();
+}
+async function downloadZip(){
+  if(PLAN.problems.length){ $("writeMsg").innerHTML=`<div class="errbox">Fix the problems listed above first.</div>`; return; }
+  if(typeof JSZip==="undefined"){ $("writeMsg").innerHTML=`<div class="errbox">The zip library did not load (it needs an internet connection the first time).</div>`; return; }
+  const folder=`${safeTag()}_${stamp()}`, z=new JSZip(), files=allFiles(PLAN,folder);
+  for(const [path,text] of Object.entries(files)) z.file(`${folder}/${path}`,text,{unixPermissions: /\.(sh|slurm)$/.test(path)?"755":"644"});
+  z.folder(`${folder}/outputs`); z.folder(`${folder}/logs`);
+  const blob=await z.generateAsync({type:"blob",platform:"UNIX"});
+  const a=document.createElement("a"); a.href=URL.createObjectURL(blob); a.download=`${folder}.zip`; document.body.appendChild(a); a.click(); a.remove();
+  $("writeMsg").innerHTML=`<div class="okbox">Downloaded <b>${folder}.zip</b>. Unzip it where you want the run to live, then run <code>bash run_local.sh</code> inside it.</div>`;
+}
+
+/* =====================================================================
+   VIEWER
+   ===================================================================== */
+const VIEW={handle:null,name:"",files:null,data:null,exp:null,timer:null};
+function parseCSV(text){
+  const lines=text.trim().split(/\r?\n/); if(lines.length<1) return {cols:[],rows:[]};
+  const cols=lines[0].split(",").map(s=>s.trim()); const rows=[];
+  for(let i=1;i<lines.length;i++){ const p=lines[i].split(","); if(p.length<cols.length) continue;
+    const r={}; cols.forEach((c,j)=>{ const v=p[j].trim(); const x=parseFloat(v); r[c]=(isNaN(x)&&v!=="NaN")?v:x; }); rows.push(r); }
+  return {cols,rows};
+}
+async function readHandleTree(dir,prefix="",out={}){
+  for await (const [name,h] of dir.entries()){
+    const p=prefix+name;
+    if(h.kind==="directory"){ if(["inputs","logs"].includes(name)&&!prefix) continue; await readHandleTree(h,p+"/",out); }
+    else if(/\.(csv|json)$/.test(name)) out[p]=h;
+  }
+  return out;
+}
+async function openFolder(){
+  try{ VIEW.handle=await window.showDirectoryPicker({id:"c2d2runs",mode:"read"}); }catch(e){ return; }
+  VIEW.name=VIEW.handle.name; $("btnReload").disabled=false; await reloadFolder();
+}
+async function reloadFolder(){
+  if(!VIEW.handle) return;
+  try{
+    const hs=await readHandleTree(VIEW.handle), files={};
+    for(const [p,h] of Object.entries(hs)) files[p]=await (await h.getFile()).text();
+    ingestFolder(files,VIEW.name);
+  }catch(e){ $("loadMsg").innerHTML=`<div class="errbox">Could not read the folder: ${e.message}</div>`; }
+}
+function setAuto(){ clearInterval(VIEW.timer); if($("autoReload").checked) VIEW.timer=setInterval(reloadFolder,30000); }
+$("dirInput").addEventListener("change",async ev=>{
+  const fl=[...ev.target.files].filter(f=>/\.(csv|json)$/.test(f.name)); if(!fl.length) return;
+  const files={}; let top="";
+  for(const f of fl){ const parts=f.webkitRelativePath.split("/"); top=parts[0]; files[parts.slice(1).join("/")]=await f.text(); }
+  VIEW.handle=null; $("btnReload").disabled=true; ingestFolder(files,top);
+});
+$("expFile").addEventListener("change",async ev=>{
+  const f=ev.target.files[0]; if(!f) return; const t=await f.text();
+  const pts=[]; for(const line of t.split(/\r?\n/)){ const p=line.split(/[,;\t ]+/).map(Number); if(p.length>=2&&isFinite(p[0])&&isFinite(p[1])) pts.push([p[0],p[1]]); }
+  VIEW.exp=pts; $("expMsg").textContent=`${pts.length} points`;
+  if(!(+$("expD0").value>0)&&pts.length) $("expD0").value=g(pts[0][1],4);
+  drawAll();
+});
+
+function ingestFolder(files,name){
+  let sweep=null; try{ if(files["sweep.json"]) sweep=JSON.parse(files["sweep.json"]); }catch(e){}
+  // runs: from sweep.json, else from the outputs present
+  let runs = sweep? sweep.runs.map(r=>({...r})) : [];
+  if(!runs.length){
+    const ids=new Set(Object.keys(files).filter(p=>p.startsWith("outputs/")).map(p=>p.split("/")[1]));
+    runs=[...ids].sort().map(id=>({id,kind:id.startsWith("styext")?"styext":"caber",sweep_value:null,styext:null}));
+  }
+  for(const r of runs){
+    const base=`outputs/${r.id}/`;
+    r.status = "pending"; r.wall=null;
+    if(files[base+"status.json"]){ try{ const s=JSON.parse(files[base+"status.json"]); r.status=s.status; r.wall=s.wall_s; r.err=s.error; }catch(e){} }
+    r.summary = files[base+"summary.csv"]? parseCSV(files[base+"summary.csv"]).rows : null;
+    r.diag    = files[base+"caber_diag.csv"]? parseCSV(files[base+"caber_diag.csv"]).rows : null;
+    if(r.status==="pending" && r.summary) r.status="ok";
+  }
+  VIEW.data={sweep,runs,name};
+  const nOK=runs.filter(r=>r.status==="ok").length;
+  $("loadMsg").innerHTML=`Loaded <b>${name}</b> at ${new Date().toLocaleTimeString()}: ${nOK} of ${runs.length} runs finished.`;
+  $("viewBody").classList.remove("hidden");
+  const sp=sweep?sweep.sweep.param:"none";
+  $("vTitle").textContent = sweep? `Sweep “${sweep.tag}”` + (sp!=="none"?` over ${sp}`:"") : name;
+  $("vFixed").innerHTML = sweep? "Fixed: "+Object.entries(sweep.fixed).map(([k,v])=>`<span class="pill">${k} = ${typeof v==="number"?g(v,5):v}</span>`).join(" ") : "";
+  if(sweep&&sweep.preset&&!(+$("lam1s").value>0)) $("lam1s").value=sweep.preset.lambda1_s;
+  drawAll();
+}
+
+/* ---------------- features of one CaBER run ---------------- */
+function features(r){
+  const d=r.diag, s=r.summary; if(!d||d.length<3) return null;
+  const rb=+$("rbreak").value||2e-5;
+  let n=d.length; for(let i=0;i<d.length;i++){ if(d[i].R<=rb){ n=i+1; break; } }
+  const D=d.slice(0,n), W=D.map(x=>x.Wi), De=D[0].De, tl=D.map(x=>x.t/De), e=D.map(x=>x.estrain);
+  const F={id:r.id, sweep_value:r.sweep_value, De, Wi0:W[0]};
+  const capped = s && s.length && s[s.length-1].status==="terminated";
+  F.broke = D[n-1].R<=rb || (n===d.length && capped); F.t_break=F.broke? tl[n-1] : NaN;
+  F.R_end=D[n-1].R;
+  // t_*: polymer stress first matches the solvent stress
+  let is=-1; for(let i=0;i<D.length;i++){ if(-D[i].polystress>=D[i].viscstress){ is=i; break; } }
+  F.t_star = is>=0? tl[is]:NaN; F.eps_star = is>=0? e[is]:NaN;
+  // onset = first local maximum of Wi after any initial dip; elastic point = following minimum
+  let k=0; while(k<W.length-1 && W[k+1]-W[k]<=0) k++;
+  let ion=-1; for(let i=k;i<W.length-1;i++){ if(W[i+1]-W[i]<0){ ion=i; break; } }
+  const emax=e[e.length-1], lim=Math.max(1,e.findIndex(x=>x>=0.6*emax)); const iend = lim>0?lim:W.length-1;
+  if(ion>=0 && ion<iend){
+    let ie=ion; for(let i=ion;i<iend;i++) if(W[i]<W[ie]) ie=i;
+    F.t_onset=tl[ion]; F.eps_onset=e[ion]; F.Wi_onset=W[ion]; F.i_on=ion;
+    F.Wi_e=W[ie]; F.t_e=tl[ie]; F.i_e=ie;
+  } else {   // no overshoot: the elastic point is simply the minimum of Wi
+    F.t_onset=F.eps_onset=F.Wi_onset=NaN; F.i_on=-1;
+    let ie=0; for(let i=0;i<iend;i++) if(W[i]<W[ie]) ie=i;
+    F.Wi_e=W[ie]; F.t_e=tl[ie]; F.i_e=ie; }
+  F.wall_s=r.wall;
+  return F;
+}
+
+/* ---------------- plotting ---------------- */
+const VIR=["#3b528b","#31688e","#287d8e","#21918c","#1fa187","#35b779","#6ece58","#b5de2b","#fde725"];
+function ramp(i,n){ if(n<=1) return "#5aa0ff"; const x=i/(n-1)*(VIR.length-1), a=Math.floor(x), f=x-a; if(a>=VIR.length-1) return VIR.at(-1);
+  const h=s=>[1,3,5].map(j=>parseInt(s.slice(j,j+2),16)), c0=h(VIR[a]), c1=h(VIR[a+1]); return "#"+c0.map((v,j)=>Math.round(v+(c1[j]-v)*f).toString(16).padStart(2,"0")).join(""); }
+function lay(xt,yt,xlog,ylog,extra={}){ return Object.assign({paper_bgcolor:"#171d2b",plot_bgcolor:"#0f1420",font:{color:"#e7ecf5",size:12},
+  margin:{l:62,r:12,t:8,b:46},showlegend:false,hovermode:"closest",
+  xaxis:{title:{text:xt},type:xlog?"log":"linear",gridcolor:"#2b3346",zerolinecolor:"#2b3346",exponentformat:"power"},
+  yaxis:{title:{text:yt},type:ylog?"log":"linear",gridcolor:"#2b3346",zerolinecolor:"#2b3346",exponentformat:"power"}},extra); }
+const CFG={responsive:true,displaylogo:false};
+let FEATS=[];
+function xOf(D,mode){ const De=D[0].De, l=+$("lam1s").value;
+  return D.map(x=> mode==="tl"? x.t/De : mode==="tv"? x.t : mode==="eps"? x.estrain : (l>0? x.t/De*l : NaN)); }
+function e2eq(){ const sw=VIEW.data&&VIEW.data.sweep; const n= sw&&sw.fixed&&sw.fixed.Nm; if(n>0) return n;
+  const st=VIEW.data.runs.find(r=>r.kind==="styext"&&r.summary&&r.summary.length); return st? st.summary[0].E2 : 1; }
+function xTitle(m){ return {tl:"t/λ₁",tv:"t/t_v",eps:"Hencky strain ε",ts:"t [s]"}[m]; }
+function drawAll(){
+  if(!VIEW.data||typeof Plotly==="undefined"){ if(typeof Plotly==="undefined") $("loadMsg").innerHTML+=`<div class="warnbox">The plotting library did not load; the viewer needs an internet connection the first time.</div>`; return; }
+  const runs=VIEW.data.runs, cab=runs.filter(r=>r.kind==="caber"), sty=Object.fromEntries(runs.filter(r=>r.kind==="styext").map(r=>[r.id,r]));
+  const mode=$("xaxis").value; if(mode==="ts" && !(+$("lam1s").value>0)) $("loadMsg").innerHTML+=`<div class="warnbox">Enter λ₁ in seconds to plot against t [s].</div>`;
+  const rb=+$("rbreak").value||2e-5, E0=e2eq();
+  const T={R:[],W:[],F:[],M:[],EW:[],MW:[]};
+  FEATS=[];
+  cab.forEach((r,i)=>{
+    const col=ramp(i,cab.length), nm = r.sweep_value!=null? `${VIEW.data.sweep.sweep.param} = ${g(r.sweep_value,4)}` : r.id;
+    const F=features(r); if(F) FEATS.push(F);
+    if(!r.diag||!r.summary) return;
+    let n=r.diag.findIndex(x=>x.R<=rb); n = n<0? r.diag.length : n+1;
+    const D=r.diag.slice(0,n), S=r.summary.slice(0,n), x=xOf(D,mode);
+    const L=(xx,yy,dash,extra={})=>Object.assign({x:xx,y:yy,mode:"lines",name:nm,line:{color:col,width:2,dash:dash||"solid"},hovertemplate:`${nm}<br>%{x:.4g}, %{y:.4g}<extra></extra>`},extra);
+    T.R.push(L(x,D.map(d=>d.R)));
+    T.W.push(L(x,D.map(d=>d.Wi)));
+    T.F.push(L(x,D.map(d=>-d.polystress/d.capstress)), L(x,D.map(d=>d.viscstress/d.capstress),"dash"));
+    T.M.push(L(x,S.map(s=>s.E2/E0)), L(x.slice(1),S.slice(1).map(s=>s.etaE1),"dash"));
+    T.EW.push(L(D.slice(1).map(d=>d.Wi),S.slice(1).map(s=>s.etaE1)));
+    T.MW.push(L(D.map(d=>d.Wi),S.map(s=>s.E2/E0)));
+    if(F&&F.i_e>=0){ const mk=(sym,ii)=>({x:[D[ii].Wi],y:null,mode:"markers",marker:{symbol:sym,size:10,color:col,line:{color:"#fff",width:1}},hoverinfo:"skip"});
+      for(const [arr,key] of [[T.EW,"etaE1"],[T.MW,"E2"]]) for(const [sym,ii] of [["triangle-up",F.i_on],["circle",F.i_e]]) if(ii>=0&&ii<S.length){ const m=mk(sym,ii); m.y=[S[ii][key]/(key==='E2'?E0:1)]; arr.push(m); } }
+    const st=sty[r.styext]; if(st&&st.summary){ const ss=st.summary.filter(s=>s.Wi>0);
+      const sc = Object.values(sty).length>1? col : "#c9d3e3";
+      T.EW.push({x:ss.map(s=>s.Wi),y:ss.map(s=>s.etaE1),mode:"lines",line:{color:sc,dash:"dot",width:1.6},name:`steady (${r.styext})`,hovertemplate:`steady ${r.styext}<br>Wi %{x:.4g}, η̃p %{y:.4g}<extra></extra>`});
+      T.MW.push({x:ss.map(s=>s.Wi),y:ss.map(s=>s.E2/E0),mode:"lines",line:{color:sc,dash:"dot",width:1.6},name:`steady (${r.styext})`,hovertemplate:`steady ${r.styext}<br>Wi %{x:.4g}, M %{y:.4g}<extra></extra>`}); }
+  });
+  // experiment overlay on R
+  if(VIEW.exp&&VIEW.exp.length&&(mode==="tl"||mode==="ts")){
+    const D0=+$("expD0").value, sh=+$("expShift").value||0, l=+$("lam1s").value;
+    if(D0>0&&(mode==="ts"||l>0)) T.R.push({x:VIEW.exp.map(p=>mode==="ts"?p[0]-sh:(p[0]-sh)/l),y:VIEW.exp.map(p=>p[1]/D0),mode:"markers",name:"experiment",marker:{color:"#ff9d5c",size:5,symbol:"circle-open"},hovertemplate:"experiment<br>%{x:.4g}, %{y:.4g}<extra></extra>"});
+  }
+  const xt=xTitle(mode), lg={showlegend:true,legend:{font:{size:10},bgcolor:"rgba(0,0,0,0)"}};
+  Plotly.react("pR",T.R,lay(xt,"R/R₀",false,true,{...lg,yaxis:{type:"log",title:{text:"R/R₀"},gridcolor:"#2b3346",exponentformat:"power",range:[Math.log10(rb)-0.3,0.2]}}),CFG);
+  Plotly.react("pW",T.W,lay(xt,"Wi",false,true),CFG);
+  Plotly.react("pF",T.F,lay(xt,"stress / N_cap",false,false,{yaxis:{range:[-0.03,1.05],title:{text:"N_p/N_cap, N_v/N_cap"},gridcolor:"#2b3346"},shapes:[{type:"line",xref:"paper",x0:0,x1:1,y0:0.5,y1:0.5,line:{color:"#6b778c",width:1,dash:"dot"}}]}),CFG);
+  Plotly.react("pM",T.M,lay(xt,"M,  η̃p",false,true),CFG);
+  const vline={shapes:[{type:"line",yref:"paper",x0:2/3,x1:2/3,y0:0,y1:1,line:{color:"#6b778c",width:1,dash:"dash"}}]};
+  Plotly.react("pEW",T.EW,lay("Wi","η̃p",true,true,vline),CFG);
+  Plotly.react("pMW",T.MW,lay("Wi","M",true,true,vline),CFG);
+  drawTable(); drawFeat();
+}
+const FCOLS=[["sweep_value","sweep value"],["Wi0","Wi(0)"],["t_star","t*/λ₁"],["eps_star","ε*"],["t_onset","onset t/λ₁"],["Wi_onset","onset Wi"],["Wi_e","Wi_e (elastic)"],["t_e","t_e/λ₁"],["t_break","t_break/λ₁"],["wall_s","wall [s]"]];
+function drawTable(){
+  const runs=VIEW.data.runs, byId=Object.fromEntries(FEATS.map(f=>[f.id,f]));
+  const hdr=`<tr><th>run</th><th>status</th>${FCOLS.map(c=>`<th>${c[1]}</th>`).join("")}</tr>`;
+  $("featTable").innerHTML=hdr+runs.map(r=>{ const F=byId[r.id]||{};
+    const cells=FCOLS.map(([k])=>{ const v= k==="sweep_value"? r.sweep_value : k==="wall_s"? r.wall : F[k]; return `<td>${v==null||Number.isNaN(v)?"–":(typeof v==="number"?g(v,4):v)}</td>`; }).join("");
+    const st=r.status||"pending"; const note = (r.kind==="caber"&&F.id&&!F.broke)? " (no breakup)" : "";
+    return `<tr><td>${r.id}</td><td class="st-${st}" title="${(r.err||"").replace(/"/g,"'")}">${st}${note}</td>${cells}</tr>`; }).join("");
+  const sel=$("featSel"), cur=sel.value;
+  sel.innerHTML=FCOLS.filter(c=>!["sweep_value","wall_s"].includes(c[0])).map(c=>`<option value="${c[0]}">${c[1]}</option>`).join(""); sel.value=cur||"Wi_e";
+}
+function drawFeat(){
+  if(!VIEW.data) return; const k=$("featSel").value||"Wi_e";
+  const sp=VIEW.data.sweep?VIEW.data.sweep.sweep.param:"none";
+  const pts=FEATS.filter(f=>f.sweep_value!=null&&isFinite(f[k])).sort((a,b)=>a.sweep_value-b.sweep_value);
+  const lab=Object.fromEntries(FCOLS)[k];
+  Plotly.react("pFeat",[{x:pts.map(f=>f.sweep_value),y:pts.map(f=>f[k]),mode:"lines+markers",marker:{size:8,color:"#7ad0b8"},line:{color:"#7ad0b8"}}],
+    lay(sp==="none"?"(no sweep)":sp,lab,$("featLogX").checked,$("featLogY").checked),CFG);
+}
+function downloadFeatures(){
+  const cols=["id","sweep_value","De","Wi0","t_star","eps_star","t_onset","eps_onset","Wi_onset","Wi_e","t_e","t_break","R_end","wall_s"];
+  const txt=cols.join(",")+"\n"+FEATS.map(f=>cols.map(c=>f[c]==null||Number.isNaN(f[c])?"":f[c]).join(",")).join("\n")+"\n";
+  const a=document.createElement("a"); a.href=URL.createObjectURL(new Blob([txt],{type:"text/csv"})); a.download=`${VIEW.data.name}_features.csv`; a.click();
+}
+
+initSetup();
+</script>
+</body>
+</html>

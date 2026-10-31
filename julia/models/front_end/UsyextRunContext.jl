@@ -29,7 +29,9 @@ module UsyextRunContext
 import TOML
 
 using ..Fene:           build_fene_model, na_for_model
-using ..Drag:           build_drag_assessor, drag_draining_ratio, drag_ratio_zimm
+using ..Drag:           build_drag_assessor, drag_draining_ratio, drag_ratio_zimm,
+                        parse_drag_interp, DEFAULT_P_PHI, default_p_phi, DEFAULT_Q_OES,
+                     parse_s_form, DEFAULT_G0_1D, DEFAULT_S_FORM, cu_lambda0_ratio
 using ..Spectrum:       build_spectrum_assessor
 using ..CoeffsRelax:    build_coeffs_kernel
 using ..UsyextFlows:    ConstantWiFlow, CaberFlow, CaberInertialFlow
@@ -268,6 +270,43 @@ function load_usyext_context(toml_path :: AbstractString;
         error("fe_model must be fenepme/fenepm/fenep. Got: $fe_model")
     drag_model in (:constant, :c1d2, :c2d2) ||
         error("drag_model must be constant/c1d2/c2d2. Got: $drag_model")
+    draining_model in (:partialdraining, :nondraining) ||
+        error("draining_model must be partialdraining/nondraining. Got: $draining_model")
+
+    # drag_interp: "RP"/"RPI" (default; bit-identical to earlier inputs), "OESCUI", "OESI",
+    # "BARECUI", "BAREI" (and the archived "RPD"/"RPDW"/"RPDP"/"CU").  p_phi is read only for
+    # "CU"/"OESCUI"/"BARECUI"; otherwise at the scheme's default (1.86 CU, 2.0 CUI).
+    drag_interp = parse_drag_interp(_gets(mod_sec, "drag_interp", "RP"))
+    p_phi       = drag_interp in (:cu, :oescui, :barecui) ? _getf(mod_sec, "p_phi", default_p_phi(drag_interp)) :
+                                                            default_p_phi(drag_interp)
+    drag_interp in (:cu, :oescui, :barecui) && !(isfinite(p_phi) && p_phi > 0) &&
+        error("model.p_phi must be finite and > 0 for drag_interp = \"CU\"/\"OESCUI\"/\"BARECUI\". Got: $p_phi")
+    # g0_1D / s_form (CU only; 2026-10-17): U_1D relaxation factor g(s). C_phi: overlap
+    # constant in c = φ/(C_phi E₀³), read for all schemes. Defaults are bit-identical.
+    g0_1D  = drag_interp === :cu ? _getf(mod_sec, "g0_1D", DEFAULT_G0_1D) : DEFAULT_G0_1D
+    s_form = (drag_interp === :cu && g0_1D != 1.0) ?
+                 parse_s_form(_gets(mod_sec, "s_form", "sum")) : DEFAULT_S_FORM
+    drag_interp === :cu && !(isfinite(g0_1D) && g0_1D > 0) &&
+        error("model.g0_1D must be finite and > 0 for drag_interp = \"CU\" (1.0 = off). Got: $g0_1D")
+    # q_oes (2026-10-22 pm): stretch-delayed OES dressing exponent, ψ = min(φ/E^q, 1); OESI/OESCUI
+    # only, default 0 (bit-identical). The Thin-n-Win runs set 0.25 explicitly.
+    is_oes = drag_interp in (:oesi, :oescui)
+    q_oes  = is_oes ? _getf(mod_sec, "q_oes", DEFAULT_Q_OES) : DEFAULT_Q_OES
+    !is_oes && haskey(mod_sec, "q_oes") &&
+        @warn "model.q_oes is read only for drag_interp = \"OESI\"/\"OESCUI\"; ignored for $(drag_interp)"
+    is_oes && !(isfinite(q_oes) && 0.0 <= q_oes <= 1.0) &&
+        error("model.q_oes must be finite and in [0, 1] for drag_interp = \"OESI\"/\"OESCUI\". Got: $q_oes")
+    C_phi = _getf(mod_sec, "C_phi", 1.0)
+    (isfinite(C_phi) && C_phi > 0) || error("model.C_phi must be finite and > 0. Got: $C_phi")
+    # De_mode (2026-10-17 pm): "input" keeps λ₀/λ_Z = ζ₀/ζ_Z from the drag model; "cu_fit"
+    # anchors it to RP's ansatz λ₀/λ_Z = (1 + φ^p)^(1/p), p = p_phi (fitted to SAOS).
+    De_mode_str = lowercase(_gets(mod_sec, "De_mode", "input"))
+    De_mode = De_mode_str == "input" ? :input : De_mode_str == "cu_fit" ? :cu_fit :
+              error("model.De_mode must be \"input\" or \"cu_fit\". Got: \"$De_mode_str\"")
+    if De_mode === :cu_fit && !(drag_interp in (:cu, :oescui, :barecui))
+        p_phi = _getf(mod_sec, "p_phi", DEFAULT_P_PHI)
+        (isfinite(p_phi) && p_phi > 0) || error("model.p_phi must be finite and > 0 for De_mode = \"cu_fit\". Got: $p_phi")
+    end
 
     # ── Flow ──────────────────────────────────────────────────────────────────
     flow_kind = lowercase(_gets(flow_sec, "kind", "caber"))
@@ -312,10 +351,15 @@ function load_usyext_context(toml_path :: AbstractString;
     Qinf_sq = fe_model === :fenepme ? Q0_sq * NK : Q0_sq * NK / Nm
 
     c_star = E0^(-3)
-    ckBT   = phi * c_star * kBT
+    ckBT   = phi * c_star * kBT / C_phi      # c = φ/(C_phi E₀³)
+    # Stress-prefactor concentration seen by the CaBER stress balance (K̃ = φ_σ U_1 and
+    # the ψ switch); the drag/spectrum keep the true φ. C_phi = 1 → φ_σ = φ (historical).
+    phi_stress = phi / C_phi
 
     # ── Drag LUT + spectrum ───────────────────────────────────────────────────
-    drag_lut = build_drag_assessor(phi, hK_star, NK, drag_model, draining_model)
+    drag_lut = build_drag_assessor(phi, hK_star, NK, drag_model, draining_model;
+                                   drag_interp=drag_interp, p_phi=p_phi,
+                                   g0_1D=g0_1D, s_form=s_form, q_oes=q_oes)
     spectrum  = build_spectrum_assessor(
         spectrum_model = spectrum_model,
         Nm             = Nm,
@@ -324,12 +368,28 @@ function load_usyext_context(toml_path :: AbstractString;
         phi            = phi,
         drag_model     = drag_model,
         draining_model = draining_model,
+        drag_interp    = drag_interp,
+        p_phi          = p_phi,
+        g0_1D          = g0_1D,
+        s_form         = s_form,
+        q_oes          = q_oes,
     )
 
     # ── Equilibrium drag + ηₛ ────────────────────────────────────────────────
     # E=1 → equilibrium coil (matches MATLAB: r = √Y/E₀ = 1 at equilibrium)
-    Gam_eq, _ = drag_ratio_zimm(1.0, phi, hK_star, NK, drag_model, draining_model)
+    Gam_eq, _ = drag_ratio_zimm(1.0, phi, hK_star, NK, drag_model, draining_model;
+                                drag_interp=drag_interp, p_phi=p_phi,
+                                g0_1D=g0_1D, s_form=s_form, q_oes=q_oes)   # λ₀/λ_Z incl. g(s₀) for CU
     Gam_eq > 0 || error("Equilibrium drag ratio must be > 0")
+    # λ₀/λ_Z: model-anchored (1+φ^p)^(1/p) under cu_fit (sets ηₛ and U₁ = Γ_eq·U_z);
+    # otherwise the drag-model value (ζ₀/ζ_Z incl. g(s₀) for CU).
+    De_mode === :cu_fit && (Gam_eq = cu_lambda0_ratio(phi, p_phi))
+    # [flow] De_Z (optional): with cu_fit, De = De_Z · λ₀/λ_Z overrides flow.De.
+    De_Z = _getf(flow_sec, "De_Z", NaN)
+    if De_mode === :cu_fit && isfinite(De_Z)
+        De_Z > 0 || error("flow.De_Z must be > 0. Got: $De_Z")
+        De_val = De_Z * Gam_eq
+    end
     lambdaZ   = lambda0 / Gam_eq
     etas      = _etas_from_lambdaZ(lambdaZ, kBT, E0, hK_star, NK, draining_model)
 
@@ -353,7 +413,7 @@ function load_usyext_context(toml_path :: AbstractString;
         flow_ctx = ConstantWiFlow(De_val, Wi_const, alphas)
     elseif flow_kind == "caber"
         U_1      = _compute_U1(Gam_eq, hK_star, NK, draining_model)
-        flow_ctx = CaberFlow(De_val, alphas, phi, U_1)
+        flow_ctx = CaberFlow(De_val, alphas, phi_stress, U_1)
     elseif flow_kind == "caber_inertial"
         # De_val is interpreted as De_R (the Rayleigh-time Deborah number).
         # X_R = inertio-capillary Newtonian end-plate factor (default 0.5115 ⇔
@@ -380,7 +440,7 @@ function load_usyext_context(toml_path :: AbstractString;
                 @info "caber_inertial: flow.Oh not specified — defaulting to Oh=0.005 (Gaillard aqueous)"
             end
         end
-        flow_ctx = CaberInertialFlow(De_val, alphas, phi, Oh_val, U_1; XR=X_R, Xe=X_e)
+        flow_ctx = CaberInertialFlow(De_val, alphas, phi_stress, Oh_val, U_1; XR=X_R, Xe=X_e)
     else
         error("load_usyext_context: flow.kind=\"$flow_kind\" not implemented in Julia port yet")
     end

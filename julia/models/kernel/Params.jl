@@ -12,7 +12,9 @@ module Params
 
 using ..Fene:      build_fene_model, na_for_model, _rouse_weight_matrix,
                    FenePME, FenePM, FeneP
-using ..Drag:      build_drag_assessor, DragAssessor, drag_draining_ratio
+using ..Drag:      build_drag_assessor, DragAssessor, drag_draining_ratio,
+                   parse_drag_interp, DEFAULT_P_PHI, default_p_phi, DEFAULT_Q_OES,
+                   parse_s_form, DEFAULT_G0_1D, DEFAULT_S_FORM, cu_lambda0_ratio
 using ..Spectrum:  build_spectrum_assessor, SpectrumAssessor
 using ..CoeffsRelax: build_coeffs_kernel, CoeffsKernel, closure_from_M_diag
 
@@ -35,7 +37,14 @@ TOML section mapping
 --------------------
 [chain]         : Nm, NK, hK_star
 [concentration] : phi
-[model]         : fe_model, drag_model, draining_model, spectrum_model
+[model]         : fe_model, drag_model, draining_model, spectrum_model,
+                  drag_interp (optional, "OESCUI"|"OESI"|"BARECUI"|"BAREI"|"RPI"(="RP")
+                               and the archived "RPD"|"RPDW"|"RPDP"|"CU"),
+                  p_phi (optional, CU, OESCUI and BARECUI only; default 1.86 for CU, 2.0 for the CUI schemes),
+                  q_oes (optional, OESI and OESCUI only; stretch-delayed dressing exponent, default 0),
+                  g0_1D, s_form (optional, CU only; U_1D relaxation factor), C_phi (optional),
+                  De_mode (optional, "input"|"cu_fit")
+[flow]          : Oh, De (or De_Z with De_mode = "cu_fit"), De_Z (optional), gravity
 [flow]          : Oh, De
 [grid]          : N_cells, z_max, half_bridge
 [time]          : t_max, dt_init, dt_min, dt_max, rtol, atol
@@ -50,13 +59,15 @@ struct C2D2Params
     # Concentration
     phi             :: Float64      # c/c*  — concentration ratio, used in constitutive kernel
 
-    # Initial bridge geometry (Spiegelberg IC only)
-    # ic_volfrac sets the shape parameter for the Spiegelberg initial profile.
+    # Initial bridge fill (Spiegelberg reverse-squeeze and sine ICs)
+    # ic_volfrac is the bridge VOLUME FRACTION Φ = V_bridge/V_cyl = L₀/L — exactly, for
+    # the Spiegelberg profile (∫A dz integrates to Φ; see InitialConditions Appendix B),
+    # and the same Φ knob for ic_type = "sine" (mapped to the neck radius via a quadratic).
     # It is INDEPENDENT of phi (c/c*): you may want a well-stretched chain concentration
     # but a mildly necked initial bridge, or vice versa.
-    # For ic_type = "bhat" this field is ignored.
+    # For ic_type = "bhat" this field is ignored (bhat = the Φ≈0.30141 / R_neck=0.2 sine member).
     # Default: equals phi (backward-compatible with code that used phi for both).
-    ic_volfrac      :: Float64      # Spiegelberg bridge shape parameter (NOT c/c*)
+    ic_volfrac      :: Float64      # bridge volume fraction Φ = L₀/L (NOT polymer c/c*)
 
     # Constitutive model selectors
     fe_model        :: Symbol       # :fenepme | :fenepm | :fenep
@@ -87,9 +98,99 @@ struct C2D2Params
     output_dir      :: String
 
     # Initial condition selector
-    # "spiegelberg" (default) — Spiegelberg/JC bridge profile using ic_volfrac
-    # "bhat"                  — Bhat et al. 2010 cosine profile: R = 1 - 0.8 sin(πz/(2z_max))
+    # "spiegelberg" (default) — Spiegelberg/JC reverse-squeeze profile using ic_volfrac (Φ)
+    # "bhat"                  — Bhat et al. 2010 profile: R = 1 - 0.8 sin(πz/(2z_max)) (R_neck=0.2)
+    # "sine"                  — one-parameter sine bridge, R_neck from ic_volfrac (Φ) via a quadratic
     ic_type         :: String
+
+    # Drag-interpolation scheme (c2d2 only; 2026-10-15).  :rp = report scheme (default,
+    # bit-identical to earlier code); :cu = Churchill–Usagi blend with exponent p_phi.
+    drag_interp     :: Symbol       # :rp | :rpd | :rpdw | :rpdp | :cu | :oescui | :oesi | :barecui | :barei
+    p_phi           :: Float64      # CU / CUI exponent (read only for those schemes; scheme-dependent default)
+
+    # U_1D relaxation factor g(s) and overlap constant (2026-10-17).
+    # g0_1D: Rouse/Zimm floor of g (CU only; 1.0 = off, bit-identical; ≈ 0.44 physically).
+    # s_form: form of the screening variable s(N_c, N_t) (CU only; :sum).
+    # C_phi : overlap constant in c = φ/(C_phi E₀³); divides the stress prefactor
+    #         (all drag schemes; 1.0 = bit-identical).
+    g0_1D           :: Float64
+    s_form          :: Symbol
+    C_phi           :: Float64
+
+    # Model-anchored equilibrium relaxation time (2026-10-17 pm, RP's ansatz).
+    # De_mode = :input  → `De` is used as given (default; bit-identical).
+    #         = :cu_fit → De = De_Z · (1 + φ^p)^(1/p), p = p_phi (λ₀/λ_Z fitted to SAOS).
+    # De_Z: Deborah number on the dilute Zimm time (same scaling as De); NaN if not
+    # supplied. Whenever De_Z is known the polymer stress prefactor is tied to it:
+    # poly_prefactor = −φ U/(C_phi De_Z) (U₁ = U λ₀/λ_Z = U De/De_Z), instead of
+    # using the model's ζ₀/ζ_Z (which carries g(s₀) since 4a9e141).
+    De_mode         :: Symbol
+    De_Z            :: Float64
+
+    # Stretch-delayed OES dressing exponent (2026-10-22 pm): ψ = min(φ/E^q, 1) in the OES
+    # schemes (OESI/OESCUI only; 0 = ψ = min(φ, 1), bit-identical; Thin-n-Win runs use 0.25).
+    q_oes           :: Float64
+end
+
+# Backward-compatible positional constructor (2026-10-22 am arity, 31 fields): fills q_oes = 0.
+function C2D2Params(Nm, NK, hK_star, phi, ic_volfrac,
+                    fe_model, drag_model, draining_model, spectrum_model,
+                    Oh, De, gravity, N_cells, z_max, half_bridge,
+                    t_max, dt_init, dt_min, dt_max, rtol, atol,
+                    save_interval, output_dir, ic_type, drag_interp, p_phi,
+                    g0_1D, s_form, C_phi, De_mode, De_Z)
+    return C2D2Params(Nm, NK, hK_star, phi, ic_volfrac,
+                      fe_model, drag_model, draining_model, spectrum_model,
+                      Oh, De, gravity, N_cells, z_max, half_bridge,
+                      t_max, dt_init, dt_min, dt_max, rtol, atol,
+                      save_interval, output_dir, ic_type,
+                      drag_interp, p_phi, g0_1D, s_form, C_phi, De_mode, De_Z, DEFAULT_Q_OES)
+end
+
+# Backward-compatible positional constructor (pre-2026-10-15 arity, 24 fields):
+# fills drag_interp = :rp, p_phi = DEFAULT_P_PHI and the 2026-10-17 defaults.
+function C2D2Params(Nm, NK, hK_star, phi, ic_volfrac,
+                    fe_model, drag_model, draining_model, spectrum_model,
+                    Oh, De, gravity, N_cells, z_max, half_bridge,
+                    t_max, dt_init, dt_min, dt_max, rtol, atol,
+                    save_interval, output_dir, ic_type)
+    return C2D2Params(Nm, NK, hK_star, phi, ic_volfrac,
+                      fe_model, drag_model, draining_model, spectrum_model,
+                      Oh, De, gravity, N_cells, z_max, half_bridge,
+                      t_max, dt_init, dt_min, dt_max, rtol, atol,
+                      save_interval, output_dir, ic_type,
+                      :rp, DEFAULT_P_PHI, DEFAULT_G0_1D, DEFAULT_S_FORM, 1.0, :input, NaN)
+end
+
+# Backward-compatible positional constructor (2026-10-15 arity, 26 fields):
+# fills g0_1D = 1.0, s_form = :sum, C_phi = 1.0, De_mode = :input, De_Z = NaN.
+function C2D2Params(Nm, NK, hK_star, phi, ic_volfrac,
+                    fe_model, drag_model, draining_model, spectrum_model,
+                    Oh, De, gravity, N_cells, z_max, half_bridge,
+                    t_max, dt_init, dt_min, dt_max, rtol, atol,
+                    save_interval, output_dir, ic_type, drag_interp, p_phi)
+    return C2D2Params(Nm, NK, hK_star, phi, ic_volfrac,
+                      fe_model, drag_model, draining_model, spectrum_model,
+                      Oh, De, gravity, N_cells, z_max, half_bridge,
+                      t_max, dt_init, dt_min, dt_max, rtol, atol,
+                      save_interval, output_dir, ic_type,
+                      drag_interp, p_phi, DEFAULT_G0_1D, DEFAULT_S_FORM, 1.0, :input, NaN)
+end
+
+# Backward-compatible positional constructor (2026-10-17 am arity, 29 fields):
+# fills De_mode = :input, De_Z = NaN.
+function C2D2Params(Nm, NK, hK_star, phi, ic_volfrac,
+                    fe_model, drag_model, draining_model, spectrum_model,
+                    Oh, De, gravity, N_cells, z_max, half_bridge,
+                    t_max, dt_init, dt_min, dt_max, rtol, atol,
+                    save_interval, output_dir, ic_type, drag_interp, p_phi,
+                    g0_1D, s_form, C_phi)
+    return C2D2Params(Nm, NK, hK_star, phi, ic_volfrac,
+                      fe_model, drag_model, draining_model, spectrum_model,
+                      Oh, De, gravity, N_cells, z_max, half_bridge,
+                      t_max, dt_init, dt_min, dt_max, rtol, atol,
+                      save_interval, output_dir, ic_type,
+                      drag_interp, p_phi, g0_1D, s_form, C_phi, :input, NaN)
 end
 
 """
@@ -116,6 +217,54 @@ function load_params_toml(path::String)::C2D2Params
     ic_volfrac = Float64(get(out_sec, "ic_volfrac", phi))
     # gravity: dimensionless G = ρgR/γ; defaults to 0 (gravity-free / horizontal bridge)
     gravity = Float64(get(flow_sec, "gravity", 0.0))
+    # drag_interp / p_phi: optional; "RP" (default) reproduces earlier inputs exactly.
+    # p_phi is consulted only for "CU" / "OESCUI" / "BARECUI" (and cu_fit) and is otherwise stored
+    # at the scheme's default (1.86 for CU, 2.0 for the CUI schemes; `default_p_phi`).
+    mod_sec     = d["model"]
+    drag_interp = parse_drag_interp(String(get(mod_sec, "drag_interp", "RP")))
+    # De_mode (2026-10-17 pm): "input" (default) | "cu_fit" (De = De_Z·(1+φ^p)^(1/p)).
+    De_mode_str = lowercase(String(get(mod_sec, "De_mode", "input")))
+    De_mode = De_mode_str == "input"  ? :input  :
+              De_mode_str == "cu_fit" ? :cu_fit :
+              error("[model] De_mode must be \"input\" or \"cu_fit\". Got: \"$(De_mode_str)\"")
+    # p_phi is needed by the CU / OESCUI / BARECUI drags and by the cu_fit De₀; otherwise stored at
+    # the scheme's default.  (With cu_fit and a CUI drag the one key serves both; default 2.0.)
+    needs_p_phi = drag_interp in (:cu, :oescui, :barecui) || De_mode === :cu_fit
+    p_phi       = needs_p_phi ? Float64(get(mod_sec, "p_phi", default_p_phi(drag_interp))) : default_p_phi(drag_interp)
+    if needs_p_phi
+        (isfinite(p_phi) && p_phi > 0) ||
+            error("[model] p_phi must be finite and > 0 for drag_interp = \"CU\"/\"OESCUI\"/\"BARECUI\" / De_mode = \"cu_fit\". Got: $(p_phi)")
+    end
+    # De_Z: [flow] De_Z (preferred; same scaling as De) or [model] De_Z. NaN when absent.
+    De_Z_raw = get(flow_sec, "De_Z", get(mod_sec, "De_Z", NaN))
+    De_Z     = Float64(De_Z_raw)
+    if De_mode === :cu_fit
+        (isfinite(De_Z) && De_Z > 0) ||
+            error("[model] De_mode = \"cu_fit\" needs De_Z (finite, > 0; [flow] De_Z). Got: $(De_Z)")
+        haskey(flow_sec, "De") &&
+            @warn "[flow] De is ignored for De_mode = \"cu_fit\" (De = De_Z·(1+φ^p)^(1/p))"
+        De_val = De_Z * cu_lambda0_ratio(phi, p_phi)
+    else
+        De_val = get_f("flow", "De")
+        isnan(De_Z) || (isfinite(De_Z) && De_Z > 0) ||
+            error("[flow] De_Z must be finite and > 0 when given. Got: $(De_Z)")
+    end
+    # g0_1D / s_form (CU only) and C_phi (all schemes); defaults are bit-identical.
+    g0_1D  = drag_interp === :cu ? Float64(get(mod_sec, "g0_1D", DEFAULT_G0_1D)) : DEFAULT_G0_1D
+    s_form = (drag_interp === :cu && g0_1D != 1.0) ?
+                 parse_s_form(String(get(mod_sec, "s_form", "sum"))) : DEFAULT_S_FORM
+    drag_interp === :cu && !(isfinite(g0_1D) && g0_1D > 0) &&
+        error("[model] g0_1D must be finite and > 0 for drag_interp = \"CU\" (1.0 = off). Got: $(g0_1D)")
+    C_phi = Float64(get(mod_sec, "C_phi", 1.0))
+    (isfinite(C_phi) && C_phi > 0) ||
+        error("[model] C_phi must be finite and > 0. Got: $(C_phi)")
+    # q_oes (2026-10-22 pm): stretch-delayed OES dressing, OESI/OESCUI only; 0 = bit-identical.
+    is_oes = drag_interp in (:oesi, :oescui)
+    q_oes  = is_oes ? Float64(get(mod_sec, "q_oes", DEFAULT_Q_OES)) : DEFAULT_Q_OES
+    !is_oes && haskey(mod_sec, "q_oes") &&
+        @warn "[model] q_oes is read only for drag_interp = \"OESI\"/\"OESCUI\"; ignored for $(drag_interp)"
+    is_oes && !(isfinite(q_oes) && 0.0 <= q_oes <= 1.0) &&
+        error("[model] q_oes must be finite and in [0, 1] for drag_interp = \"OESI\"/\"OESCUI\". Got: $(q_oes)")
 
     return C2D2Params(
         get_i("chain",         "Nm"),
@@ -128,7 +277,7 @@ function load_params_toml(path::String)::C2D2Params
         get_sym("model",       "draining_model"),
         get_sym("model",       "spectrum_model"),
         get_f("flow",          "Oh"),
-        get_f("flow",          "De"),
+        De_val,
         gravity,
         get_i("grid",          "N_cells"),
         get_f("grid",          "z_max"),
@@ -142,6 +291,14 @@ function load_params_toml(path::String)::C2D2Params
         get_f("output",        "save_interval"),
         get_s("output",        "output_dir"),
         ic_type,
+        drag_interp,
+        p_phi,
+        g0_1D,
+        s_form,
+        C_phi,
+        De_mode,
+        De_Z,
+        q_oes,
     )
 end
 
@@ -164,7 +321,8 @@ Qinf_sq       : dimensionless FENE pole (= NK for PME/PM, NK/Nm for P variant)
 Na            : number of X auxiliary variables
 zeta0_ratio   : equilibrium drag ratio ζ₀/ζ_Z
 U_zimm        : Zimm pre-factor U = U_∞·α/α_∞ (= 0.325 for non-draining theta coil)
-poly_prefactor: = −φ·U_zimm·(ζ₀/ζ_Z)/De_v  (= −χ/3 from FVM note Eq. 42)
+poly_prefactor: = −φ·U_zimm·(λ₀/λ_Z)/(C_phi·De_v)  (= −χ/3 from FVM note Eq. 42); λ₀/λ_Z = De/De_Z when De_Z is given, else ζ₀/ζ_Z (includes g(s₀) for CU)
+lambda0_ratio : the λ₀/λ_Z actually used
 """
 struct RuntimeCtx
     params          :: C2D2Params
@@ -175,7 +333,8 @@ struct RuntimeCtx
     Na              :: Int
     zeta0_ratio     :: Float64
     U_zimm          :: Float64   # Zimm pre-factor U = U_∞ · α/α_∞  (0.325 for non-draining)
-    poly_prefactor  :: Float64   # = −φ · U_zimm · (ζ₀/ζ_Z) / De_v  (χ/3 with correct sign)
+    poly_prefactor  :: Float64   # = −φ · U_zimm · (λ₀/λ_Z) / (C_phi De)  (χ/3 with correct sign)
+    lambda0_ratio   :: Float64   # λ₀/λ_Z used in the prefactor: De/De_Z if De_Z given, else ζ₀/ζ_Z (model)
 end
 
 """
@@ -223,7 +382,9 @@ function build_runtime_ctx(p::C2D2Params)::RuntimeCtx
 
     # ---- Drag LUT ----
     drag_lut = build_drag_assessor(p.phi, p.hK_star, Float64(p.NK),
-                                   p.drag_model, p.draining_model)
+                                   p.drag_model, p.draining_model;
+                                   drag_interp=p.drag_interp, p_phi=p.p_phi,
+                                   g0_1D=p.g0_1D, s_form=p.s_form, q_oes=p.q_oes)
 
     # ---- Spectrum assessor ----
     spectrum = build_spectrum_assessor(
@@ -234,6 +395,11 @@ function build_runtime_ctx(p::C2D2Params)::RuntimeCtx
         phi            = p.phi,
         drag_model     = p.drag_model,
         draining_model = p.draining_model,
+        drag_interp    = p.drag_interp,
+        p_phi          = p.p_phi,
+        g0_1D          = p.g0_1D,
+        s_form         = p.s_form,
+        q_oes          = p.q_oes,
     )
 
     # ---- Assembled coefficients kernel ----
@@ -262,11 +428,25 @@ function build_runtime_ctx(p::C2D2Params)::RuntimeCtx
     # contribution to ∂Π/∂z is −(χ/3) · ∂(A · tau_diff)/∂z.
     # Hence poly_prefactor = −χ/3 = −φ · U_zimm · (ζ₀/ζ_Z) / De_v.
     #
+    # 2026-10-17 (RP, overlap-crossover note §4): with c = φ/(C_phi E₀³),
+    # χ/3 = φ · U · (λ₀/λ_Z) / (C_phi · De).
+    #   * De_Z known (always for De_mode = :cu_fit; optional otherwise): U₁ = U λ₀/λ_Z
+    #     = U De/De_Z, so poly_prefactor = −φ U/(C_phi De_Z) — the prefactor is tied
+    #     to the same λ₀ that sets De₀ and is independent of h*_K and g0.
+    #   * De_Z absent: λ₀/λ_Z = ζ₀/ζ_Z from the model (`zeta0`; carries g(s₀) for the
+    #     CU scheme), as before — default runs are bit-identical.
+    #
     # Sign convention: poly_prefactor is NEGATIVE for a polymer that partially
     # resists thinning (which is correct for the viscoelastic cases in Bhat 2010).
-    poly_prefactor = -(p.phi * U_zimm * zeta0) / p.De
+    if isfinite(p.De_Z)
+        lambda0_ratio  = p.De / p.De_Z
+        poly_prefactor = -(p.phi * U_zimm) / (p.C_phi * p.De_Z)
+    else
+        lambda0_ratio  = zeta0
+        poly_prefactor = -(p.phi * U_zimm * zeta0) / (p.C_phi * p.De)
+    end
 
-    return RuntimeCtx(p, kernel, Sp, Q0_sq, Qinf_sq, Na, zeta0, U_zimm, poly_prefactor)
+    return RuntimeCtx(p, kernel, Sp, Q0_sq, Qinf_sq, Na, zeta0, U_zimm, poly_prefactor, lambda0_ratio)
 end
 
 # ── Rouse weights ─────────────────────────────────────────────────────────────

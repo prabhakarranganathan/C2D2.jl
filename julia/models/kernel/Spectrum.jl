@@ -22,7 +22,7 @@ Public API
 """
 module Spectrum
 
-using ..Drag: drag_draining_ratio, drag_ratio_zimm
+using ..Drag: drag_draining_ratio, drag_ratio_zimm, DEFAULT_P_PHI, default_p_phi, DEFAULT_G0_1D, DEFAULT_S_FORM, DEFAULT_Q_OES
 
 export relative_spectrum, drag_dilation
 export SpectrumAssessor, build_spectrum_assessor, eval_spectrum
@@ -104,14 +104,23 @@ struct SpectrumAssessor
     phi            :: Float64
     drag_model     :: Symbol
     draining_model :: Symbol
+    drag_interp    :: Symbol        # drag-interpolation scheme (c2d2 only; see Drag.jl)
+    p_phi          :: Float64       # CU / CUI exponent (unused otherwise)
+    g0_1D          :: Float64       # U_1D factor floor (CU only; 1.0 = off)
+    s_form         :: Symbol        # s(N_c, N_t) form (CU only)
+    q_oes          :: Float64       # stretch-delayed OES dressing exponent (OESI/OESCUI only)
 end
 
 """
     build_spectrum_assessor(; spectrum_model, Nm, NK, hK_star,
-                              phi, drag_model, draining_model) -> SpectrumAssessor
+                              phi, drag_model, draining_model,
+                              drag_interp=:rp, p_phi=default_p_phi(drag_interp),
+                              g0_1D=DEFAULT_G0_1D, s_form=DEFAULT_S_FORM, q_oes=DEFAULT_Q_OES) -> SpectrumAssessor
 
 Construct a SpectrumAssessor. Computes the equilibrium drag ratio ζ₀/ζ_Z
-(at E=1, the coiled state) once at construction time.
+(at E=1, the coiled state) once at construction time, with the same
+drag-interpolation scheme (and U_1D factor g) as the chain drag so that Λ = 1
+at rest; with g on, `zeta0_ratio` = g(s₀)·ζ₀/ζ_Z = λ₀/λ_Z.
 """
 function build_spectrum_assessor(; spectrum_model::Symbol,
                                    Nm::Int,
@@ -119,9 +128,16 @@ function build_spectrum_assessor(; spectrum_model::Symbol,
                                    hK_star::Float64,
                                    phi::Float64,
                                    drag_model::Symbol,
-                                   draining_model::Symbol)::SpectrumAssessor
+                                   draining_model::Symbol,
+                                   drag_interp::Symbol = :rp,
+                                   p_phi::Float64 = default_p_phi(drag_interp),
+                                   g0_1D::Float64 = DEFAULT_G0_1D,
+                                   s_form::Symbol = DEFAULT_S_FORM,
+                                   q_oes::Float64 = DEFAULT_Q_OES)::SpectrumAssessor
     # Equilibrium drag (E = 1 = coiled state)
-    zeta0_ratio, _ = drag_ratio_zimm(1.0, phi, hK_star, NK, drag_model, draining_model)
+    zeta0_ratio, _ = drag_ratio_zimm(1.0, phi, hK_star, NK, drag_model, draining_model;
+                                     drag_interp=drag_interp, p_phi=p_phi,
+                                     g0_1D=g0_1D, s_form=s_form, q_oes=q_oes)
 
     if spectrum_model !== :blob
         lhat_eq = relative_spectrum(spectrum_model, Nm, NK, hK_star)
@@ -131,7 +147,8 @@ function build_spectrum_assessor(; spectrum_model::Symbol,
 
     return SpectrumAssessor(spectrum_model, Nm, NK, hK_star,
                             zeta0_ratio, lhat_eq,
-                            phi, drag_model, draining_model)
+                            phi, drag_model, draining_model,
+                            drag_interp, p_phi, g0_1D, s_form, q_oes)
 end
 
 """
@@ -151,7 +168,9 @@ function eval_spectrum(a::SpectrumAssessor, E::Float64,
     else
         # For blob spectrum, n_blob and G depend on E — recompute each call
         _, diag = drag_ratio_zimm(E, a.phi, a.hK_star, a.NK,
-                                   a.drag_model, a.draining_model)
+                                   a.drag_model, a.draining_model;
+                                   drag_interp=a.drag_interp, p_phi=a.p_phi,
+                                   g0_1D=a.g0_1D, s_form=a.s_form, q_oes=a.q_oes)
         n_blob = diag.n_blob
         G      = diag.G
         lhat   = relative_spectrum(:blob, a.Nm, a.NK, a.hK_star; n_blob=n_blob, G=G)

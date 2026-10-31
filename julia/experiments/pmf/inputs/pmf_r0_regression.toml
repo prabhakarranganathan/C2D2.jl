@@ -1,0 +1,54 @@
+# r = 0 regression: planar mixed flow with r = 0 must reproduce STYEXT planar extension
+# (styext_planar_regression.toml, alphas = [1, -1, 0]) to solver tolerance. FENE-PM, c2d2, Nm=3, phi=0.1, blob spectrum.
+
+[run]
+label = "pmf_r0_regression"
+
+[polymer]
+Q0_sq   = 1.0
+kBT     = 1.0
+lambda0 = 1.0
+NK      = 2000
+Nm      = 3
+hK_star = 0.25
+
+[concentration]
+phi = 0.1
+
+[model]
+fe_model        = "fenepm"
+drag_model      = "c2d2"
+drag_interp     = "RP"
+draining_model  = "partialdraining"
+spectrum_model  = "auto"
+
+[limits]
+Wi_max              = 5.0
+max_frac_stretch_sq = 0.999
+
+[continuation]
+max_steps = 5000
+ds0       = 0.001
+ds_min    = 1e-8
+ds_max    = 100.0
+
+[newton]
+tol_res                  = 1e-10
+max_newton               = 30
+target_newton            = 10
+target_offmanifold_ratio = 0.3
+min_denom_tol            = 0.0
+tol_J_cond               = 1e-14
+use_armijo               = true
+armijo_c1                = 1e-4
+armijo_beta              = 0.5
+max_bt                   = 30
+
+[newton_fixed_Y]
+max_newton_fixed_Y = 30
+tol_FY_rel_hard    = 100.0
+tol_FY_rel_soft    = 1e-2
+
+[flow]
+kind = "pmf"
+r    = 0.0

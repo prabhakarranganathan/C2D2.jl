@@ -1,12 +1,28 @@
 """
     StyextModelPack.jl
 
-Model-pack for the steady-extension PAC solver.
+Model-pack for the steady homogeneous-flow PAC solver: steady extension
+(STYEXT) and, since 2026-10-16, steady planar mixed flows (PMF; simple shear
+at r = 1). The flow kinematics are carried by `ctx.flow`
+(`StyextFlows.PrincipalExtension` | `StyextFlows.PlanarMixedFlow`); everything
+else — closure scalars, PAC/fixed-Y/fixed-Wi residuals, Newton and the
+manifold builder — is shared.
 
 Mirrors MATLAB's
   styext_modelpack_core.m / styext_FENE_PM_modelpack.m / styext_FENE_PME_modelpack.m
+for the extensional branch.
 
-Provides the PAC and fixed-Y residual/Jacobians that drive the continuation.
+Steady modal tensors
+--------------------
+Extension (κ = Wi·diag α):   M_pα = σ_p / (θ_p − 2 Wi α_α)       (diagonal)
+PMF (κ = Wi·κ̂(r)), report `eq:pmf-components-r`, strain-axes frame:
+    A_p = σ_p(θ_p² + 2θ_p Wi + 4r²Wi²) / (θ_p D_p)
+    B_p = σ_p(θ_p² − 2θ_p Wi + 4r²Wi²) / (θ_p D_p)
+    C_p = −4 σ_p r Wi² / (θ_p D_p)
+    D_p = σ_p/θ_p,            D_p := θ_p² − 4(1 − r²)Wi²  (common denominator)
+and the modal trace (`eq:pmf-trace-r`)
+    T_p = (σ_p/θ_p)(3θ_p² + 4(3r² − 1)Wi²) / (θ_p² − 4(1 − r²)Wi²).
+At r = 0 these reduce exactly to planar extension with α = (1, −1, 0).
 
 Normalisation convention
 ------------------------
@@ -14,21 +30,32 @@ MATLAB's coeffs_relaxation uses r = √Y / E₀ as the drag/spectrum LUT argumen
 (where E₀ = √Nm for Q₀²=1).  Julia's CoeffsKernel uses E = Z.E directly.
 To match MATLAB for Nm > 1 we set Z.E = √Y / E₀ before calling eval_coeffs!.
 
+FENE pole convention: Qinf_sq is supplied by the caller. STYEXT/PMF use
+Q∞² = Q₀²·NK for FENE-PME and Q₀²·NK/Nm (per spring) for FENE-PM/P; the VELB
+path (Params.jl) uses NK throughout. The two silently differ for Nm > 1.
+
+Stress sign: `Stress.polymer_stress` gives τ/(c kBT) = −Σ_p(3 f_p M_p − I)
+(compressive-positive, STYEXT convention). The material functions below carry
+the compensating minus sign so η_E, η_p, Ψ₁ are positive in their usual sense.
+
 State-vector layout
 -------------------
-FENE-PME (Na=0)  :  ztilde = [Y; μ]              length 2
-FENE-PM  (Na=1)  :  ztilde = [X; Y; μ]           length 3
-FENE-P   (Na=Nm) :  ztilde = [X₁…Xₙ; Y; μ]       length Nm+2
+FENE-PME / Hookean (Na=0) :  ztilde = [Y; μ]              length 2
+FENE-PM  (Na=1)           :  ztilde = [X; Y; μ]           length 3
+FENE-P   (Na=Nm)          :  ztilde = [X₁…Xₙ; Y; μ]       length Nm+2
 
 Public API
 ----------
   StyextMPCtx         — assembled model-pack context
-  build_mp_ctx(...)   — constructor
+  build_mp_ctx(...)   — constructor (keyword `flow` selects the kinematics)
   pack_ztilde         — (X, Y, μ) → vector
   unpack_ztilde       — vector → (X, Y, μ)
   rj_pac              — PAC residual + Jacobian
   rj_fixed_Y          — fixed-Y residual + Jacobian
+  rj_fixed_Wi         — fixed-Wi residual + Jacobian  (unknowns [X; Y])
   eval_state_obs      — C2D2Obs from current (X, Y, μ)
+  get_Wi_pole         — Wi_pole at (X, Y)  (Inf for pole-free flows)
+  modal_tensors       — steady modal tensors at given (θ_p, σ_p, Wi)
 """
 module StyextModelPack
 
@@ -36,28 +63,32 @@ using LinearAlgebra: norm, dot
 
 using ..Fene:       AbstractFeneModel, FenePME, FenePM, FeneP, fene_peterlin
 using ..CoeffsRelax: CoeffsKernel, ClosureZ, eval_coeffs!
-using ..StyextFlows: Wi_from_mu
+using ..StyextFlows: AbstractSteadyFlow, PrincipalExtension, PlanarMixedFlow,
+                     has_pole, wi_pole, pole_mode_index, wi_map, mu_from_wi, wi_shear
+import ..StyextFlows: dwi_pole_dtheta
 using ..Stress:     polymer_stress
 using ..StateObs:   C2D2Obs
 
 export StyextMPCtx, build_mp_ctx,
        pack_ztilde, unpack_ztilde,
-       rj_pac, rj_fixed_Y, eval_state_obs, get_Wi_pole
+       rj_pac, rj_fixed_Y, rj_fixed_Wi, eval_state_obs, get_Wi_pole,
+       modal_tensors, eval_modal_tensors, linear_limit_shear
 
 # ── Context struct ────────────────────────────────────────────────────────────
 
 """
     StyextMPCtx
 
-Assembled context for the STYEXT model pack.
+Assembled context for the steady model pack.
 
 Fields
 ------
 kernel   : CoeffsKernel (FENE + drag LUT + spectrum; build once, reuse)
 Sp       : Nm-vector of Rouse end-to-end weights  (Y-closure weights wY)
-alphas   : NTuple{3,Float64} — principal flow-rate ratios (αx, αy, αz)
-amax     : maximum of alphas (extensional axis rate)
-Na       : number of X auxiliaries (0=PME, 1=PM, Nm=P)
+alphas   : NTuple{3,Float64} — principal flow-rate ratios (αx, αy, αz).
+           For a PlanarMixedFlow this is the strain-axes frame (1, −1, 0).
+amax     : maximum of alphas (extensional axis rate; 1 for PMF)
+Na       : number of X auxiliaries (0=PME/Hookean, 1=PM, Nm=P)
 Nm       : number of modes
 Ymin     : lower bound on Y = E₀² = Nm Q₀²
 Ymax     : upper bound on Y = E∞²
@@ -68,6 +99,7 @@ lambda0  : longest relaxation time [time units]
 etas     : solvent viscosity
 ckBT     : c·k_B·T
 h_fd     : FD step for d/dY numerical derivatives (default 1e-6)
+flow     : AbstractSteadyFlow — kinematics (PrincipalExtension | PlanarMixedFlow)
 """
 struct StyextMPCtx
     kernel   :: CoeffsKernel
@@ -85,11 +117,17 @@ struct StyextMPCtx
     etas     :: Float64
     ckBT     :: Float64
     h_fd     :: Float64
+    flow     :: AbstractSteadyFlow
 end
 
 """
     build_mp_ctx(kernel, Sp, alphas, Na, Nm, E0_sq, Einf_sq,
-                 Q0_sq, Qinf_sq, lambda0, etas, ckBT) -> StyextMPCtx
+                 Q0_sq, Qinf_sq, lambda0, etas, ckBT;
+                 flow = PrincipalExtension(alphas)) -> StyextMPCtx
+
+`flow` selects the kinematics. Without it the context is the historical STYEXT
+one (principal extension with `alphas`). For `PlanarMixedFlow` the stored
+`alphas` are overwritten with the strain-axes frame (1, −1, 0).
 """
 function build_mp_ctx(kernel   :: CoeffsKernel,
                       Sp       :: Vector{Float64},
@@ -102,14 +140,23 @@ function build_mp_ctx(kernel   :: CoeffsKernel,
                       Qinf_sq  :: Float64,
                       lambda0  :: Float64,
                       etas     :: Float64,
-                      ckBT     :: Float64)::StyextMPCtx
-    amax = maximum(alphas)
-    amax > 0 || error("build_mp_ctx: amax = $amax ≤ 0; alphas must have a positive element")
+                      ckBT     :: Float64;
+                      flow     :: Union{Nothing, AbstractSteadyFlow} = nothing)::StyextMPCtx
+    if flow === nothing
+        flow = PrincipalExtension(alphas)        # validates amax > 0
+    end
+    if flow isa PrincipalExtension
+        alphas_ctx = flow.alphas
+        amax       = flow.amax
+    else
+        alphas_ctx = (1.0, -1.0, 0.0)
+        amax       = 1.0
+    end
     E0 = sqrt(E0_sq)
-    return StyextMPCtx(kernel, Sp, alphas, amax,
+    return StyextMPCtx(kernel, Sp, alphas_ctx, amax,
                        Na, Nm, E0_sq, Einf_sq,
                        E0, Q0_sq, Qinf_sq,
-                       lambda0, etas, ckBT, 1e-6)
+                       lambda0, etas, ckBT, 1e-6, flow)
 end
 
 # ── Pack / unpack ─────────────────────────────────────────────────────────────
@@ -165,47 +212,106 @@ end
 
 @inline _clamp_Y(Y::Float64, ctx::StyextMPCtx) = clamp(Y, ctx.Ymin, ctx.Ymax)
 
-# ── D, inv-D and T_p ─────────────────────────────────────────────────────────
+# ── Modal trace T_p and its partials (flow-kinematics kernel) ─────────────────
 
 """
-    _Tp!(out, theta_p, sigma_p, alphas, Wi) -> (D, invD, Tsum_invD2)
+    _modal_Tp!(Tp, dTp_dWi, dTp_dth, theta_p, sigma_p, flow, Wi) -> min_denom
 
-Fill T_p vector in-place: T_p = σ_p · Σ_α 1/D_pα.
-Also returns D (Nm×3) and invD (Nm×3) for Jacobian use,
-and a vector sum_invD2 (Nm) = Σ_α 1/D_pα².
+Fill, per mode p, the steady modal trace T_p = tr M_p and its partials
+∂T_p/∂Wi (θ_p, σ_p fixed) and ∂T_p/∂θ_p (σ_p, Wi fixed). Returns the smallest
+kinematic denominator over all modes (≤ 0 ⇒ inadmissible):
+  extension : min over (p, α) of  D_pα = θ_p − 2 Wi α_α
+  PMF       : min over p of       D_p  = θ_p² − 4(1 − r²) Wi²
 """
-function _Tp!(Tp_out::Vector{Float64},
-               theta_p::Vector{Float64}, sigma_p::Vector{Float64},
-               alphas::NTuple{3, Float64}, Wi::Float64)
+function _modal_Tp!(Tp::Vector{Float64}, dTp_dWi::Vector{Float64}, dTp_dth::Vector{Float64},
+                    theta_p::Vector{Float64}, sigma_p::Vector{Float64},
+                    f::PrincipalExtension, Wi::Float64)::Float64
     Nm = length(theta_p)
-    D        = Matrix{Float64}(undef, Nm, 3)
-    invD     = Matrix{Float64}(undef, Nm, 3)
-    sum_invD  = Vector{Float64}(undef, Nm)
-    sum_invD2 = Vector{Float64}(undef, Nm)
-
+    min_d = Inf
     @inbounds for p in 1:Nm
-        tp = theta_p[p]
-        s1 = 0.0;  s2 = 0.0
+        tp = theta_p[p];  sp = sigma_p[p]
+        s1 = 0.0;  s2 = 0.0;  sa = 0.0
         for α in 1:3
-            d        = tp - 2.0 * Wi * alphas[α]
-            id       = 1.0 / d
-            D[p, α]  = d
-            invD[p, α] = id
+            a  = f.alphas[α]
+            d  = tp - 2.0 * Wi * a
+            id = 1.0 / d
             s1 += id
             s2 += id * id
+            sa += a * id * id
+            min_d = min(min_d, d)
         end
-        sum_invD[p]  = s1
-        sum_invD2[p] = s2
-        Tp_out[p]    = sigma_p[p] * s1
+        Tp[p]      = sp * s1
+        dTp_dWi[p] = sp * 2.0 * sa
+        dTp_dth[p] = -sp * s2
     end
-    return D, invD, sum_invD, sum_invD2
+    return min_d
+end
+
+function _modal_Tp!(Tp::Vector{Float64}, dTp_dWi::Vector{Float64}, dTp_dth::Vector{Float64},
+                    theta_p::Vector{Float64}, sigma_p::Vector{Float64},
+                    f::PlanarMixedFlow, Wi::Float64)::Float64
+    Nm  = length(theta_p)
+    r2  = f.r^2
+    W2  = Wi^2
+    cD  = 4.0 * (1.0 - r2)          # D = θ² − cD·Wi²
+    cN  = 4.0 * (3.0 * r2 - 1.0)    # N = 3θ² + cN·Wi²
+    min_d = Inf
+    @inbounds for p in 1:Nm
+        tp  = theta_p[p];  sp = sigma_p[p]
+        th2 = tp * tp
+        D   = th2 - cD * W2
+        N   = 3.0 * th2 + cN * W2
+        Tp[p]      = sp * N / (tp * D)
+        dTp_dWi[p] = 16.0 * sp * tp * Wi / (D * D)
+        dTp_dth[p] = sp * (6.0 * th2 * D - N * (D + 2.0 * th2)) / (th2 * D * D)
+        min_d = min(min_d, D)
+    end
+    return min_d
+end
+
+# ── Steady modal tensors ──────────────────────────────────────────────────────
+
+"""
+    modal_tensors(flow::PrincipalExtension, theta_p, sigma_p, Wi) -> M_diag (Nm×3)
+    modal_tensors(flow::PlanarMixedFlow,    theta_p, sigma_p, Wi) -> (A, B, C, D)
+
+Steady modal conformation tensors at the given closure coefficients.
+For PMF the components are in the strain-axes frame (report
+`eq:pmf-components-r`): M_p = [A C 0; C B 0; 0 0 D].
+"""
+function modal_tensors(f::PrincipalExtension, theta_p::Vector{Float64},
+                       sigma_p::Vector{Float64}, Wi::Float64)
+    Nm = length(theta_p)
+    M_diag = Matrix{Float64}(undef, Nm, 3)
+    @inbounds for p in 1:Nm, α in 1:3
+        M_diag[p, α] = sigma_p[p] / (theta_p[p] - 2.0 * Wi * f.alphas[α])
+    end
+    return M_diag
+end
+
+function modal_tensors(f::PlanarMixedFlow, theta_p::Vector{Float64},
+                       sigma_p::Vector{Float64}, Wi::Float64)
+    Nm = length(theta_p)
+    A = Vector{Float64}(undef, Nm); B = similar(A); C = similar(A); D = similar(A)
+    r  = f.r
+    W2 = Wi^2
+    @inbounds for p in 1:Nm
+        tp  = theta_p[p];  sp = sigma_p[p]
+        th2 = tp * tp
+        den = tp * (th2 - 4.0 * (1.0 - r^2) * W2)
+        A[p] = sp * (th2 + 2.0 * tp * Wi + 4.0 * r^2 * W2) / den
+        B[p] = sp * (th2 - 2.0 * tp * Wi + 4.0 * r^2 * W2) / den
+        C[p] = -4.0 * sp * r * W2 / den
+        D[p] = sp / tp
+    end
+    return A, B, C, D
 end
 
 # ── Weighted T_p sum with all partial derivatives ─────────────────────────────
 
 """
     _Tp_weighted_all(ctx, X, Y, Wi, w, theta_p, sigma_p)
-                   -> (Tsum, dTsum_dX, dTsum_dY, dTsum_dWi)
+                   -> (Tsum, dTsum_dX, dTsum_dY, dTsum_dWi, min_denom)
 
 Compute w · T_p and the three partial derivatives needed for the Jacobian.
 theta_p and sigma_p are pre-computed at (X, Y) and passed in for efficiency.
@@ -223,21 +329,13 @@ function _Tp_weighted_all(ctx       :: StyextMPCtx,
                            sigma_p   :: Vector{Float64})
     Nm = ctx.Nm
     Na = ctx.Na
-    Tp = Vector{Float64}(undef, Nm)
-    D, invD, _, sum_invD2 = _Tp!(Tp, theta_p, sigma_p, ctx.alphas, Wi)
+    Tp      = Vector{Float64}(undef, Nm)
+    dTp_dWi = Vector{Float64}(undef, Nm)
+    dTp_dth = Vector{Float64}(undef, Nm)
+    min_d = _modal_Tp!(Tp, dTp_dWi, dTp_dth, theta_p, sigma_p, ctx.flow, Wi)
 
-    Tsum = dot(w, Tp)
-
-    # ── dTsum/dWi (analytic) ─────────────────────────────────────────────────
-    # dT_p/dWi = σ_p · 2 · Σ_α α_α / D_pα²
-    dTsum_dWi = 0.0
-    @inbounds for p in 1:Nm
-        s = 0.0
-        for α in 1:3
-            s += ctx.alphas[α] * invD[p, α]^2
-        end
-        dTsum_dWi += w[p] * sigma_p[p] * 2.0 * s
-    end
+    Tsum      = dot(w, Tp)
+    dTsum_dWi = dot(w, dTp_dWi)
 
     # ── dTsum/dX (analytic; Na=0 → empty; Na=1 → scalar) ────────────────────
     dTsum_dX = zeros(Na)
@@ -246,8 +344,7 @@ function _Tp_weighted_all(ctx       :: StyextMPCtx,
         _, df_dX = fene_peterlin(X[1], ctx.Q0_sq, ctx.Qinf_sq)
         @inbounds for p in 1:Nm
             dtheta_dX_p = df_dX * 3.0 * sigma_p[p]
-            dT_dX_p     = -sigma_p[p] * sum_invD2[p] * dtheta_dX_p
-            dTsum_dX[1] += w[p] * dT_dX_p
+            dTsum_dX[1] += w[p] * dTp_dth[p] * dtheta_dX_p
         end
     elseif Na > 1
         error("_Tp_weighted_all: analytic dX only implemented for Na=0 and Na=1 (FENE-P not yet supported)")
@@ -258,12 +355,12 @@ function _Tp_weighted_all(ctx       :: StyextMPCtx,
     f_Tsum = (YY::Float64) -> begin
         tp2, sp2, _ = _eval_ts!(ctx, X, _clamp_Y(YY, ctx))
         Tp2 = Vector{Float64}(undef, Nm)
-        _Tp!(Tp2, tp2, sp2, ctx.alphas, Wi)
+        _modal_Tp!(Tp2, dTp_dWi, dTp_dth, tp2, sp2, ctx.flow, Wi)   # scratch reuse
         dot(w, Tp2)
     end
     dTsum_dY = _fd1_2nd(f_Tsum, Y, ctx.Ymin, ctx.Ymax; h=h)
 
-    return Tsum, dTsum_dX, dTsum_dY, dTsum_dWi
+    return Tsum, dTsum_dX, dTsum_dY, dTsum_dWi, min_d
 end
 
 # ── 2nd-order finite difference ───────────────────────────────────────────────
@@ -288,23 +385,27 @@ end
 
 # ── Wi_pole derivatives ───────────────────────────────────────────────────────
 
-"""dWi_pole/dY via FD at (X, Y) with Wi_pole = θ₁(X,Y)/(2 amax)."""
+"""dWi_pole/dY via FD at (X, Y). Zero for pole-free flows."""
 function _dWi_pole_dY_fd(ctx::StyextMPCtx, X::Vector{Float64}, Y::Float64)::Float64
+    has_pole(ctx.flow) || return 0.0
     f = (YY::Float64) -> begin
         tp, _, _ = _eval_ts!(ctx, X, _clamp_Y(YY, ctx))
-        tp[1] / (2.0 * ctx.amax)
+        wi_pole(ctx.flow, tp)
     end
     return _fd1_2nd(f, Y, ctx.Ymin, ctx.Ymax; h=ctx.h_fd)
 end
 
-"""dWi_pole/dX analytically for FENE-PM (Na=1): = (dθ₁/dX[1]) / (2 amax)."""
+"""dWi_pole/dX analytically for FENE-PM (Na=1): = (dθ_p*/dX[1]) · dWi_pole/dθ."""
 function _dWi_pole_dX_PM(ctx::StyextMPCtx,
                           X::Vector{Float64}, Y::Float64,
+                          theta_p::Vector{Float64},
                           sigma_p::Vector{Float64})::Vector{Float64}
+    has_pole(ctx.flow) || return [0.0]
     _, df_dX = fene_peterlin(X[1], ctx.Q0_sq, ctx.Qinf_sq)
-    # dθ₁/dX = df/dX · 3 · σ₁
-    dtheta1_dX = df_dX * 3.0 * sigma_p[1]
-    return [dtheta1_dX / (2.0 * ctx.amax)]
+    pstar = pole_mode_index(ctx.flow, theta_p)
+    # dθ_p*/dX = df/dX · 3 · σ_p*
+    dtheta_dX = df_dX * 3.0 * sigma_p[pstar]
+    return [dtheta_dX * dwi_pole_dtheta(ctx.flow)]
 end
 
 # ── Weight vectors per closure model ─────────────────────────────────────────
@@ -338,7 +439,6 @@ function rj_pac(ctx   :: StyextMPCtx,
                 t_prev :: AbstractVector{Float64})
 
     Na  = ctx.Na
-    Nm  = ctx.Nm
     X, Y_raw, mu = unpack_ztilde(z, Na)
     Y = _clamp_Y(Y_raw, ctx)
 
@@ -346,25 +446,23 @@ function rj_pac(ctx   :: StyextMPCtx,
 
     # ── θ_p / σ_p at (X, Y) ──────────────────────────────────────────────────
     theta_p, sigma_p, _ = _eval_ts!(ctx, X, Y)
-    Wi_pole = theta_p[1] / (2.0 * ctx.amax)
+    Wi_pole = wi_pole(ctx.flow, theta_p)
 
     # ── Wi_pole derivatives ───────────────────────────────────────────────────
     dWi_pole_dY = _dWi_pole_dY_fd(ctx, X, Y)
-    dWi_pole_dX = Na > 0 ? _dWi_pole_dX_PM(ctx, X, Y, sigma_p) : Float64[]
+    dWi_pole_dX = Na > 0 ? _dWi_pole_dX_PM(ctx, X, Y, theta_p, sigma_p) : Float64[]
 
     # ── μ → Wi chain-rule ────────────────────────────────────────────────────
-    Wi      = Wi_from_mu(mu, Wi_pole)
-    dWi_dmu = Wi_pole * exp(-mu)
-    em      = 1.0 - exp(-mu)           # 1 − e^{−μ}
-    dWi_dY  = em * dWi_pole_dY
-    dWi_dX  = Na > 0 ? em .* dWi_pole_dX : Float64[]
+    Wi, dWi_dmu, dWi_dWp = wi_map(ctx.flow, mu, Wi_pole)
+    dWi_dY  = dWi_dWp * dWi_pole_dY
+    dWi_dX  = Na > 0 ? dWi_dWp .* dWi_pole_dX : Float64[]
 
     # ── Weighted closure sums + all partials ──────────────────────────────────
-    SsumY, dSsumY_dX, dSsumY_dY, dSsumY_dWi =
+    SsumY, dSsumY_dX, dSsumY_dY, dSsumY_dWi, min_d =
         _Tp_weighted_all(ctx, X, Y, Wi, wY, theta_p, sigma_p)
 
     if Na > 0
-        SsumX, dSsumX_dX, dSsumX_dY, dSsumX_dWi =
+        SsumX, dSsumX_dX, dSsumX_dY, dSsumX_dWi, _ =
             _Tp_weighted_all(ctx, X, Y, Wi, wX, theta_p, sigma_p)
     end
 
@@ -404,7 +502,7 @@ function rj_pac(ctx   :: StyextMPCtx,
         J[rowArc, colY]  = t2[1]
         J[rowArc, colMu] = t2[2]
 
-    else        # FENE-PME: 2×2
+    else        # FENE-PME / Hookean: 2×2
         F[1] = FY
         F[2] = Farc
 
@@ -413,11 +511,6 @@ function rj_pac(ctx   :: StyextMPCtx,
         J[2, 1] = t2[1]
         J[2, 2] = t2[2]
     end
-
-    # ── min_denom diagnostic ──────────────────────────────────────────────────
-    Tp_diag = Vector{Float64}(undef, Nm)
-    D_diag, _, _, _ = _Tp!(Tp_diag, theta_p, sigma_p, ctx.alphas, Wi)
-    min_d = minimum(D_diag)
 
     info = (Wi=Wi, Wi_pole=Wi_pole, min_denom=min_d, mu=mu)
     return F, J, info
@@ -439,7 +532,6 @@ function rj_fixed_Y(ctx    :: StyextMPCtx,
                     Y_fixed :: Float64)
 
     Na  = ctx.Na
-    Nm  = ctx.Nm
     X, _, mu = unpack_ztilde(z, Na)
     Y = _clamp_Y(Y_fixed, ctx)
 
@@ -447,21 +539,18 @@ function rj_fixed_Y(ctx    :: StyextMPCtx,
 
     # ── θ_p / σ_p at (X, Y_fixed) ────────────────────────────────────────────
     theta_p, sigma_p, _ = _eval_ts!(ctx, X, Y)
-    Wi_pole = theta_p[1] / (2.0 * ctx.amax)
+    Wi_pole = wi_pole(ctx.flow, theta_p)
 
-    dWi_pole_dX = Na > 0 ? _dWi_pole_dX_PM(ctx, X, Y, sigma_p) : Float64[]
+    dWi_pole_dX = Na > 0 ? _dWi_pole_dX_PM(ctx, X, Y, theta_p, sigma_p) : Float64[]
 
-    Wi      = Wi_from_mu(mu, Wi_pole)
-    dWi_dmu = Wi_pole * exp(-mu)
-    em      = 1.0 - exp(-mu)
-    dWi_dX  = Na > 0 ? em .* dWi_pole_dX : Float64[]
+    Wi, dWi_dmu, dWi_dWp = wi_map(ctx.flow, mu, Wi_pole)
+    dWi_dX  = Na > 0 ? dWi_dWp .* dWi_pole_dX : Float64[]
 
     # ── Closure sums (no dY needed for fixed-Y Newton) ────────────────────────
-    # Reuse _Tp_weighted_all but the dY component is not used in J here.
-    SsumY, dSsumY_dX, _, dSsumY_dWi =
+    SsumY, dSsumY_dX, _, dSsumY_dWi, min_d =
         _Tp_weighted_all(ctx, X, Y, Wi, wY, theta_p, sigma_p)
     if Na > 0
-        SsumX, dSsumX_dX, _, dSsumX_dWi =
+        SsumX, dSsumX_dX, _, dSsumX_dWi, _ =
             _Tp_weighted_all(ctx, X, Y, Wi, wX, theta_p, sigma_p)
     end
 
@@ -481,16 +570,69 @@ function rj_fixed_Y(ctx    :: StyextMPCtx,
         J[Na+1, colX]  = dSsumY_dX[1] + dSsumY_dWi * dWi_dX[1]
         J[Na+1, colMu] = dSsumY_dWi   * dWi_dmu
 
-    else        # FENE-PME: 1×1 (in [mu] space)
+    else        # FENE-PME / Hookean: 1×1 (in [mu] space)
         F[1]    = SsumY - Y
         J[1, 1] = dSsumY_dWi * dWi_dmu
     end
 
-    # ── Diagnostics ───────────────────────────────────────────────────────────
-    Tp_diag = Vector{Float64}(undef, Nm)
-    D_diag, _, _, _ = _Tp!(Tp_diag, theta_p, sigma_p, ctx.alphas, Wi)
-    min_d = minimum(D_diag)
+    info = (Wi=Wi, Wi_pole=Wi_pole, min_denom=min_d, mu=mu)
+    return F, J, info
+end
 
+# ── Fixed-Wi residual + Jacobian ──────────────────────────────────────────────
+
+"""
+    rj_fixed_Wi(ctx, z, Wi) -> (F, J, info)
+
+Fixed-Wi Newton: solve the closure equations for the state Z = (X, Y) at a
+prescribed Wi (direct Wi sweeps; the natural mode for pole-free flows such as
+simple shear, where the report proves a unique steady state at every Wi).
+
+z = [X(1:Na); Y]        (length Na+1)
+F = [FX(1:Na); FY]      (length Na+1)
+J is (Na+1)×(Na+1) wrt [X(1:Na); Y].
+
+For flows with a pole, Wi ≥ Wi_pole(Z) is inadmissible: `info.min_denom ≤ 0`
+and the Newton driver aborts (`min_denom_fail`).
+"""
+function rj_fixed_Wi(ctx :: StyextMPCtx,
+                     z   :: AbstractVector{Float64},
+                     Wi  :: Float64)
+    Na = ctx.Na
+    length(z) == Na + 1 || error("rj_fixed_Wi: length(z)=$(length(z)) ≠ Na+1=$(Na+1)")
+    X = Na > 0 ? Vector{Float64}(z[1:Na]) : Float64[]
+    Y = _clamp_Y(Float64(z[Na+1]), ctx)
+
+    wX, wY = _weights(ctx)
+
+    theta_p, sigma_p, _ = _eval_ts!(ctx, X, Y)
+    Wi_pole = wi_pole(ctx.flow, theta_p)
+
+    SsumY, dSsumY_dX, dSsumY_dY, _, min_d =
+        _Tp_weighted_all(ctx, X, Y, Wi, wY, theta_p, sigma_p)
+    if Na > 0
+        SsumX, dSsumX_dX, dSsumX_dY, _, _ =
+            _Tp_weighted_all(ctx, X, Y, Wi, wX, theta_p, sigma_p)
+    end
+
+    nF = Na + 1
+    F  = Vector{Float64}(undef, nF)
+    J  = zeros(Float64, nF, nF)
+
+    if Na > 0   # FENE-PM: 2×2 in [X; Y]
+        F[1]    = SsumX - X[1]
+        F[Na+1] = SsumY - Y
+        J[1,    1]    = dSsumX_dX[1] - 1.0
+        J[1,    Na+1] = dSsumX_dY
+        J[Na+1, 1]    = dSsumY_dX[1]
+        J[Na+1, Na+1] = dSsumY_dY - 1.0
+    else        # FENE-PME / Hookean: 1×1 in [Y]
+        F[1]    = SsumY - Y
+        J[1, 1] = dSsumY_dY - 1.0
+    end
+
+    mu = (min_d > 0.0 && (!(has_pole(ctx.flow)) || Wi < Wi_pole)) ?
+             mu_from_wi(ctx.flow, Wi, Wi_pole) : NaN
     info = (Wi=Wi, Wi_pole=Wi_pole, min_denom=min_d, mu=mu)
     return F, J, info
 end
@@ -502,11 +644,23 @@ end
 
 Compute canonical observables from a manifold point (X, Y, μ).
 
-Mirrors MATLAB's styext_state_obs.m:
+Extension (mirrors MATLAB's styext_state_obs.m):
   - etaE = -(τ_ext - τ_comp) / max(Wi/λ₀, ε)·λ₀
   - Tr   = etaE · c·k_B·T · λ₀ / (3 ηₛ)
+  - shear fields (tau_xy, eta_p, Psi1, Psi2) are NaN.
 
-At equilibrium (Wi = 0, τ = 0): etaE = 0 (→ stored as -0.0, matching MATLAB).
+Planar mixed flow (strain-axes components A_p, B_p, C_p, D_p from
+`modal_tensors`, then rotated by 45° to the Fuller–Leal flow frame
+v_x = (1+r)Wi·y, v_y = (1−r)Wi·x, which at r = 1 is the lab shear frame):
+  - tau_xx, tau_yy, tau_zz, tau_xy : flow-frame τ/(c kBT), STYEXT sign
+  - etaE1 = −(τ₁₁ − τ₂₂)/Wi, etaE2 = −(τ₁₁ − τ₃₃)/Wi  (strain frame; equals
+    STYEXT planar extension α=(1,−1,0) at r = 0), Tr1/Tr2 likewise
+  - eta_p = −τ_xy/Wi_shear  (≡ dissipation definition −τ:D/(2D:D))
+  - Psi1  = −(τ_xx − τ_yy)/Wi_shear²,  Psi2 = −(τ_yy − τ_zz)/Wi_shear²
+  with Wi_shear = 2·Wi = λ₀√(2D:D) = λ₀γ̇.  Psi2 ≡ 0 analytically at r = 1.
+
+At equilibrium (Wi = 0, τ = 0): material functions are 0 (stored as -0.0,
+matching MATLAB's eps floor).
 """
 function eval_state_obs(ctx :: StyextMPCtx,
                         X   :: Vector{Float64},
@@ -516,25 +670,19 @@ function eval_state_obs(ctx :: StyextMPCtx,
 
     # --- θ, σ, fp at (X, Y) ---
     theta_p, sigma_p, fp = _eval_ts!(ctx, X, Y)
-    Wi_pole = theta_p[1] / (2.0 * ctx.amax)
-    Wi      = Wi_from_mu(mu, Wi_pole)
+    Wi_pole  = wi_pole(ctx.flow, theta_p)
+    Wi, _, _ = wi_map(ctx.flow, mu, Wi_pole)
 
-    # --- M_diag = σ_p / D_pα  (Nm×3) ---
-    Nm = ctx.Nm
-    Tp = Vector{Float64}(undef, Nm)
-    D, invD, _, _ = _Tp!(Tp, theta_p, sigma_p, ctx.alphas, Wi)
-    M_diag = Matrix{Float64}(undef, Nm, 3)
-    @inbounds for p in 1:Nm
-        for α in 1:3
-            M_diag[p, α] = sigma_p[p] * invD[p, α]
-        end
-    end
+    return _obs_from_state(ctx.flow, ctx, theta_p, sigma_p, fp, Wi, Y)
+end
 
-    # --- Polymer stress ---
-    tau = polymer_stress(M_diag, fp)
+function _obs_from_state(f::PrincipalExtension, ctx::StyextMPCtx,
+                         theta_p, sigma_p, fp, Wi::Float64, Y::Float64)::C2D2Obs
+    M_diag = modal_tensors(f, theta_p, sigma_p, Wi)
+    tau    = polymer_stress(M_diag, fp)
 
     # --- Extensional viscosity with MATLAB's eps-floor ---
-    alphas_vec = [ctx.alphas[1], ctx.alphas[2], ctx.alphas[3]]
+    alphas_vec = [f.alphas[1], f.alphas[2], f.alphas[3]]
     i_ext  = argmax(alphas_vec)
     i_comp = setdiff(1:3, i_ext)
     taus   = (tau.xx, tau.yy, tau.zz)
@@ -553,6 +701,44 @@ function eval_state_obs(ctx :: StyextMPCtx,
                    tau.xx, tau.yy, tau.zz, :ok)
 end
 
+function _obs_from_state(f::PlanarMixedFlow, ctx::StyextMPCtx,
+                         theta_p, sigma_p, fp, Wi::Float64, Y::Float64)::C2D2Obs
+    A, B, C, D = modal_tensors(f, theta_p, sigma_p, Wi)
+
+    # --- strain-axes stress τ/(c kBT) = −Σ_p(3 f_p M_p − I)  (STYEXT sign) ---
+    t11 = 0.0; t22 = 0.0; t33 = 0.0; t12 = 0.0
+    @inbounds for p in eachindex(A)
+        t11 -= 3.0 * fp[p] * A[p] - 1.0
+        t22 -= 3.0 * fp[p] * B[p] - 1.0
+        t33 -= 3.0 * fp[p] * D[p] - 1.0
+        t12 -= 3.0 * fp[p] * C[p]
+    end
+
+    # --- rotate 45° to the flow frame (lab shear frame at r = 1) ---
+    half = 0.5 * (t11 + t22)
+    txx  = half - t12
+    tyy  = half + t12
+    txy  = 0.5 * (t11 - t22)
+    tzz  = t33
+
+    # --- strain-frame planar extensional viscosities (STYEXT definition) ---
+    strain_rate = max(Wi / ctx.lambda0, eps(Float64))
+    etaE1 = -(t11 - t22) / (strain_rate * ctx.lambda0)
+    etaE2 = -(t11 - t33) / (strain_rate * ctx.lambda0)
+    Tr1   = etaE1 * ctx.ckBT * ctx.lambda0 / (3.0 * ctx.etas)
+    Tr2   = etaE2 * ctx.ckBT * ctx.lambda0 / (3.0 * ctx.etas)
+
+    # --- shear material functions on the shear-rate measure γ̇ = 2 Wi/λ₀ ---
+    gdot_l = max(wi_shear(Wi), eps(Float64))      # λ₀γ̇ with eps floor
+    eta_p  = -txy / gdot_l
+    Psi1   = -(txx - tyy) / gdot_l^2
+    Psi2   = -(tyy - tzz) / gdot_l^2
+
+    return C2D2Obs(Wi, Y, etaE1, etaE2, Tr1, Tr2,
+                   txx, tyy, tzz, :ok,
+                   txy, eta_p, Psi1, Psi2)
+end
+
 # ── Tiny 2-vector to avoid allocations in arc computation ─────────────────────
 
 struct SVector2
@@ -566,13 +752,52 @@ _sv2_norm(a::SVector2) = sqrt(a.x^2 + a.y^2)
 Base.getindex(a::SVector2, i::Int) = i == 1 ? a.x : a.y
 
 """
+    eval_modal_tensors(ctx, X, Y, mu) -> NamedTuple
+
+Closure coefficients and steady modal tensors at a manifold point:
+`(theta_p, sigma_p, fp, Wi, Wi_pole, M)` with `M = modal_tensors(ctx.flow, …)`
+(Nm×3 diagonal for extension; `(A, B, C, D)` strain-axes tuple for PMF).
+Diagnostic helper for per-mode output (orientation angles, mode traces).
+"""
+function eval_modal_tensors(ctx::StyextMPCtx, X::Vector{Float64}, Y::Float64, mu::Float64)
+    Y = _clamp_Y(Y, ctx)
+    theta_p, sigma_p, fp = _eval_ts!(ctx, X, Y)
+    Wi_pole  = wi_pole(ctx.flow, theta_p)
+    Wi, _, _ = wi_map(ctx.flow, mu, Wi_pole)
+    return (theta_p = theta_p, sigma_p = sigma_p, fp = fp, Wi = Wi, Wi_pole = Wi_pole,
+            M = modal_tensors(ctx.flow, theta_p, sigma_p, Wi))
+end
+
+"""
+    linear_limit_shear(ctx) -> (eta0, Psi10)
+
+Zero-shear-rate polymer viscosity and first normal-stress coefficient from the
+equilibrium closure coefficients (X = Q₀², Y = E₀²; for the blob spectrum these
+depend on φ). Per mode, in units of c kBT λ₀ and c kBT λ₀²:
+    η₀    = Σ_p 3 f_p σ_p / θ_p²    (= Σ λ̂_p/f_p when Λ = 1)
+    Ψ₁,₀  = Σ_p 6 f_p σ_p / θ_p³    (= Σ 2 λ̂_p²/f_p²)
+These are the Wi → 0 limits of `eta_p` and `Psi1` in `eval_state_obs` for a
+PlanarMixedFlow at r = 1, and are flow-independent (pure LVE).
+"""
+function linear_limit_shear(ctx::StyextMPCtx)
+    X0 = ctx.Na > 0 ? fill(ctx.Q0_sq, ctx.Na) : Float64[]
+    theta_p, sigma_p, fp = _eval_ts!(ctx, X0, ctx.Ymin)
+    eta0 = 0.0; Psi10 = 0.0
+    @inbounds for p in eachindex(theta_p)
+        eta0  += 3.0 * fp[p] * sigma_p[p] / theta_p[p]^2
+        Psi10 += 6.0 * fp[p] * sigma_p[p] / theta_p[p]^3
+    end
+    return eta0, Psi10
+end
+
+"""
     get_Wi_pole(ctx, X, Y) -> Float64
 
-Return Wi_pole = θ₁(X,Y) / (2 amax) at the given state.
+Return Wi_pole at the given state (Inf for pole-free flows, e.g. PMF r ≥ 1).
 """
 function get_Wi_pole(ctx::StyextMPCtx, X::Vector{Float64}, Y::Float64)::Float64
     theta_p, _, _ = _eval_ts!(ctx, X, _clamp_Y(Y, ctx))
-    return theta_p[1] / (2.0 * ctx.amax)
+    return wi_pole(ctx.flow, theta_p)
 end
 
 end # module StyextModelPack

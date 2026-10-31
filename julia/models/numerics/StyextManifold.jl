@@ -16,6 +16,7 @@ Algorithm:
 
 Termination conditions:
   - Y ≥ Y_stop (= max_frac_stretch_sq · E∞²)
+  - max(X) ≥ X_stop (= max_frac_stretch_sq · Q∞² for FENE-PM/P; 2026-10-16)
   - Wi ≥ Wi_max
   - FY_rel > tol_FY_rel_hard
   - ds < ds_min with no acceptance
@@ -58,6 +59,7 @@ Base.@kwdef struct ManifoldOpts
     target_newton    :: Int     = 10
     target_rho       :: Float64 = 0.3
     verbose          :: Bool    = false
+    X_stop           :: Float64 = Inf     # stop when max(X) ≥ X_stop (FENE-PM/P closure → Q∞²); Inf = off
 end
 
 # ── Manifold point ────────────────────────────────────────────────────────────
@@ -218,13 +220,17 @@ end
 # ── Main manifold builder ─────────────────────────────────────────────────────
 
 """
-    build_manifold(ctx, solver_opts, man_opts) -> Vector{StyextPoint}
+    build_manifold(ctx, solver_opts, man_opts; return_reason=false)
+        -> Vector{StyextPoint}  |  (Vector{StyextPoint}, reason::String)
 
-Run the PAC manifold builder and return all accepted points.
+Run the PAC manifold builder and return all accepted points. With
+`return_reason = true` also return the termination reason
+("Y_stop" | "Wi_max" | "FY_rel_hard" | "ds_min" | "max_steps").
 """
 function build_manifold(ctx         :: StyextMPCtx,
                         solver_opts :: SolverOpts,
-                        man_opts    :: ManifoldOpts)::Vector{StyextPoint}
+                        man_opts    :: ManifoldOpts;
+                        return_reason :: Bool = false)
 
     Na        = ctx.Na
     Y_start   = ctx.Ymin
@@ -328,6 +334,13 @@ function build_manifold(ctx         :: StyextMPCtx,
             reason = "Y_stop"
             break
         end
+        # FENE-PM/P: for Nm > 1 the Y-closure saturates below E∞² (Y∞ = S₁·Nm·Q∞²
+        # in planar extension, Nm·Q∞²·ΣS_pλ̂_p²/Σλ̂_p² in shear), so the physical
+        # end of the manifold is the X-closure reaching the FENE pole.
+        if Na > 0 && isfinite(man_opts.X_stop) && maximum(Xk_acc) >= man_opts.X_stop * (1.0 - 1e-12)
+            reason = "X_stop"
+            break
+        end
         if isfinite(man_opts.Wi_max) && obs_k.Wi >= man_opts.Wi_max
             @warn "[PAC] Wi=$(obs_k.Wi) ≥ Wi_max=$(man_opts.Wi_max). Stopping."
             reason = "Wi_max"
@@ -342,7 +355,7 @@ function build_manifold(ctx         :: StyextMPCtx,
         k += 1
     end
 
-    return traj
+    return return_reason ? (traj, reason) : traj
 end
 
 # ── CSV writer ────────────────────────────────────────────────────────────────

@@ -1,0 +1,7 @@
+id,kind,NK,phi,hK_star,Nm,spectrum_model,De,eps0,sweep_param,sweep_value,styext_id,input,output_dir
+styext_01_phi1.5,styext,3774,1.5,0.015,1,auto,,,phi,1.5,,inputs/styext_01_phi1.5.toml,outputs/styext_01_phi1.5
+styext_02_phi3,styext,3774,3,0.015,1,auto,,,phi,3,,inputs/styext_02_phi3.toml,outputs/styext_02_phi3
+styext_03_phi6,styext,3774,6,0.015,1,auto,,,phi,6,,inputs/styext_03_phi6.toml,outputs/styext_03_phi6
+caber_01_phi1.5,caber,3774,1.5,0.015,1,auto,14.59857,0,phi,1.5,styext_01_phi1.5,inputs/caber_01_phi1.5.toml,outputs/caber_01_phi1.5
+caber_02_phi3,caber,3774,3,0.015,1,auto,14.59857,0,phi,3,styext_02_phi3,inputs/caber_02_phi3.toml,outputs/caber_02_phi3
+caber_03_phi6,caber,3774,6,0.015,1,auto,14.59857,0,phi,6,styext_03_phi6,inputs/caber_03_phi6.toml,outputs/caber_03_phi6

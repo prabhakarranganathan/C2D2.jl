@@ -47,6 +47,7 @@ const SUITES = [
     Suite("evals",        joinpath(_TEST_DIR, "test_evals.jl"),         _JULIA,    true),
     Suite("styext",       joinpath(_TEST_DIR, "test_styext.jl"),        _JULIA,    true),
     Suite("usyext",       joinpath(_TEST_DIR, "test_usyext.jl"),        _JULIA,    true),
+    Suite("pmf",          joinpath(_TEST_DIR, "test_pmf.jl"),           _JULIA,    true),
 ]
 
 # ── Parse test output ──────────────────────────────────────────────────────────

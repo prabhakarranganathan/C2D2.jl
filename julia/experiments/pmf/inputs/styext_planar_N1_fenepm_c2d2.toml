@@ -1,0 +1,36 @@
+# STYEXT planar-extension twin of pmf_shear_N1_fenepm_c2d2.toml (King–McKinley identity test).
+
+[run]
+label = "styext_planar_N1_fenepm_c2d2"
+
+[polymer]
+Q0_sq   = 1.0
+kBT     = 1.0
+lambda0 = 1.0
+NK      = 500
+hK_star = 0.25
+Nm      = 1
+
+[concentration]
+phi = 0.0
+
+[model]
+fe_model        = "fenepm"
+drag_model      = "c2d2"
+drag_interp     = "RP"
+draining_model  = "nondraining"
+spectrum_model  = "rouse-scaling"
+drag_lut_n_points = 4000   # must match pmf_shear_N1_fenepm_c2d2.toml (K–M identity compares closure states)
+
+[flow]
+kind   = "styext"
+alphas = [1.0, -1.0, 0.0]
+
+[limits]
+Wi_max              = "Inf"
+max_frac_stretch_sq = 0.999
+
+[newton]
+tol_res    = 1e-10
+max_newton = 30
+tol_J_cond = 1e-14

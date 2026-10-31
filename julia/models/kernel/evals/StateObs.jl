@@ -51,6 +51,16 @@ tau_xx  : τ_xx / (c kBT)
 tau_yy  : τ_yy / (c kBT)
 tau_zz  : τ_zz / (c kBT)
 status  : :ok | :nan_wi (NaN etaE when Wi ≈ 0)
+
+Shear / planar-mixed-flow fields (2026-10-16; NaN for extensional flows)
+------------------------------------------------------------------------
+tau_xy  : τ_xy / (c kBT) in the Fuller–Leal flow frame (lab shear frame at r=1)
+eta_p   : polymer shear viscosity  −τ_xy/(λ₀γ̇)   [units c kBT λ₀]
+Psi1    : first normal-stress coefficient  −(τ_xx − τ_yy)/(λ₀γ̇)²  [units c kBT λ₀²]
+Psi2    : second normal-stress coefficient −(τ_yy − τ_zz)/(λ₀γ̇)²
+For a PlanarMixedFlow the tau_xx/yy/zz/xy stored here are flow-frame components;
+etaE1/etaE2 are the strain-frame planar extensional viscosities (same definition
+as STYEXT planar extension, so PMF r=0 reproduces STYEXT α=(1,−1,0)).
 """
 struct C2D2Obs
     Wi      :: Float64
@@ -63,7 +73,18 @@ struct C2D2Obs
     tau_yy  :: Float64
     tau_zz  :: Float64
     status  :: Symbol
+    tau_xy  :: Float64
+    eta_p   :: Float64
+    Psi1    :: Float64
+    Psi2    :: Float64
 end
+
+# Backward-compatible 10-argument constructor (extensional flows): shear fields NaN.
+C2D2Obs(Wi::Float64, E2::Float64, etaE1::Float64, etaE2::Float64,
+        Tr1::Float64, Tr2::Float64, tau_xx::Float64, tau_yy::Float64,
+        tau_zz::Float64, status::Symbol) =
+    C2D2Obs(Wi, E2, etaE1, etaE2, Tr1, Tr2, tau_xx, tau_yy, tau_zz, status,
+            NaN, NaN, NaN, NaN)
 
 # ── Constructor ───────────────────────────────────────────────────────────────
 

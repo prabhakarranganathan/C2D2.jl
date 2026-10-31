@@ -1,0 +1,41 @@
+# PMF analytic case: steady simple shear, Hookean springs, constant drag, Nm=1, fixed Rouse spectrum (p^-2).
+# Multimode UCM: eta_p = sum_p lhat_p, Psi1 = 2 sum_p lhat_p^2, Psi2 = 0 (units c kBT lambda0, lambda0^2).
+
+[run]
+label = "pmf_shear_hookean_N1_const"
+
+[polymer]
+Q0_sq   = 1.0
+kBT     = 1.0
+lambda0 = 1.0
+NK      = 1e6      # Hookean: no FENE pole; NK only sets the Y cap (max_frac_stretch_sq*NK*Nm) for the sweep
+hK_star = 0.25
+Nm      = 1
+
+[concentration]
+phi = 0.0
+
+[model]
+fe_model        = "hookean"
+drag_model      = "constant"
+draining_model  = "nondraining"
+spectrum_model  = "rouse-scaling"
+
+[flow]
+kind          = "pmf"
+r             = 1.0
+Wi_convention = "shear"
+
+[limits]
+Wi_max              = "Inf"
+max_frac_stretch_sq = 0.999
+
+[sweep]
+Wi_min       = 1e-2
+Wi_max       = 1e2
+n_per_decade = 4
+
+[newton]
+tol_res    = 1e-10    # absolute ‖F‖; 1e-12 is below roundoff once Y ~ 1e3–1e4
+max_newton = 30
+tol_J_cond = 1e-14

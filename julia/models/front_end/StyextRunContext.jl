@@ -28,9 +28,12 @@ module StyextRunContext
 import TOML
 
 using ..Fene:        build_fene_model, na_for_model
-using ..Drag:        build_drag_assessor, drag_draining_ratio, drag_ratio_zimm
+using ..Drag:        build_drag_assessor, drag_draining_ratio, drag_ratio_zimm,
+                     parse_drag_interp, DEFAULT_P_PHI, default_p_phi, DEFAULT_Q_OES,
+                     parse_s_form, DEFAULT_G0_1D, DEFAULT_S_FORM, cu_lambda0_ratio
 using ..Spectrum:    build_spectrum_assessor
 using ..CoeffsRelax: build_coeffs_kernel
+using ..StyextFlows: PrincipalExtension, PlanarMixedFlow
 using ..StyextModelPack: StyextMPCtx, build_mp_ctx
 using ..StyextNewton:    SolverOpts
 using ..StyextManifold:  ManifoldOpts
@@ -58,6 +61,8 @@ struct StyextParams
     fe_model            :: Symbol
     drag_model          :: Symbol
     draining_model      :: Symbol
+    drag_interp         :: Symbol        # :rp | :rpd | :rpdw | :rpdp | :cu | :oescui | :oesi | :barecui | :barei  (c2d2 only)
+    p_phi               :: Float64       # CU / CUI exponent (read only for those schemes)
     spectrum_model      :: Symbol
     alphas              :: NTuple{3, Float64}
     Wi_max              :: Float64
@@ -72,6 +77,18 @@ struct StyextParams
     Gam_eq              :: Float64
     lambdaZ             :: Float64
     Sp                  :: Vector{Float64}
+    # ── steady planar mixed flow (2026-10-16) ─────────────────────────────────
+    flow_kind           :: Symbol            # :styext | :pmf
+    r                   :: Float64           # PMF flow-type (vorticity/strain); NaN for :styext
+    Wi_convention       :: Symbol            # :strain (report Wi) | :shear (λ₀γ̇ = 2·Wi; r = 1 only)
+    Wi_sweep            :: Vector{Float64}   # [sweep] Wi grid, strain convention (empty if absent)
+    drag_lut_n_points   :: Int               # [model] drag_lut_n_points (steady default 4000; kernel default 400)
+    # ── U_1D relaxation factor + overlap constant (2026-10-17) ────────────────
+    g0_1D               :: Float64           # CU only; 1.0 = off
+    s_form              :: Symbol            # CU only; :sum (smooth N_c′) | :sum_hard
+    C_phi               :: Float64           # c = φ/(C_phi E₀³); divides ckBT (all schemes)
+    De_mode             :: Symbol            # :input | :cu_fit (Gam_eq = λ₀/λ_Z = (1+φ^p)^(1/p))
+    q_oes               :: Float64           # stretch-delayed OES dressing exponent (OESI/OESCUI only; 0 = off)
 end
 
 # ── TOML section helpers ──────────────────────────────────────────────────────
@@ -215,24 +232,114 @@ function load_styext_context(toml_path :: AbstractString;
     draining_model = Symbol(lowercase(draining_str))
     spectrum_model = _resolve_spectrum(spectrum_str, drag_str)
 
-    fe_model in (:fenepme, :fenepm, :fenep) ||
-        error("fe_model must be fenepme/fenepm/fenep. Got: $fe_model")
+    fe_model in (:fenepme, :fenepm, :fenep, :hookean) ||
+        error("fe_model must be fenepme/fenepm/fenep/hookean. Got: $fe_model")
     drag_model in (:constant, :c1d2, :c2d2) ||
         error("drag_model must be constant/c1d2/c2d2. Got: $drag_model")
     draining_model in (:partialdraining, :nondraining) ||
         error("draining_model must be partialdraining/nondraining. Got: $draining_model")
 
+    # drag_interp: "RP"/"RPI" (default; bit-identical to earlier inputs), "OESCUI", "OESI",
+    # "BARECUI", "BAREI" (and the archived "RPD"/"RPDW"/"RPDP"/"CU").  p_phi is read only for
+    # "CU"/"OESCUI"/"BARECUI"; otherwise at the scheme's default (1.86 CU, 2.0 CUI).
+    drag_interp = parse_drag_interp(_gets(mod_sec, "drag_interp", "RP"))
+    p_phi       = drag_interp in (:cu, :oescui, :barecui) ? _getf(mod_sec, "p_phi", default_p_phi(drag_interp)) :
+                                                            default_p_phi(drag_interp)
+    drag_interp in (:cu, :oescui, :barecui) && !(isfinite(p_phi) && p_phi > 0) &&
+        error("model.p_phi must be finite and > 0 for drag_interp = \"CU\"/\"OESCUI\"/\"BARECUI\". Got: $p_phi")
+    # g0_1D / s_form (CU only; 2026-10-17): U_1D relaxation factor g(s). C_phi: overlap
+    # constant in c = φ/(C_phi E₀³), read for all schemes. Defaults are bit-identical.
+    g0_1D  = drag_interp === :cu ? _getf(mod_sec, "g0_1D", DEFAULT_G0_1D) : DEFAULT_G0_1D
+    s_form = (drag_interp === :cu && g0_1D != 1.0) ?
+                 parse_s_form(_gets(mod_sec, "s_form", "sum")) : DEFAULT_S_FORM
+    drag_interp === :cu && !(isfinite(g0_1D) && g0_1D > 0) &&
+        error("model.g0_1D must be finite and > 0 for drag_interp = \"CU\" (1.0 = off). Got: $g0_1D")
+    # q_oes (2026-10-22 pm): stretch-delayed OES dressing exponent, ψ = min(φ/E^q, 1); OESI/OESCUI
+    # only, default 0 (bit-identical). The Thin-n-Win runs set 0.25 explicitly.
+    is_oes = drag_interp in (:oesi, :oescui)
+    q_oes  = is_oes ? _getf(mod_sec, "q_oes", DEFAULT_Q_OES) : DEFAULT_Q_OES
+    !is_oes && haskey(mod_sec, "q_oes") &&
+        @warn "model.q_oes is read only for drag_interp = \"OESI\"/\"OESCUI\"; ignored for $(drag_interp)"
+    is_oes && !(isfinite(q_oes) && 0.0 <= q_oes <= 1.0) &&
+        error("model.q_oes must be finite and in [0, 1] for drag_interp = \"OESI\"/\"OESCUI\". Got: $q_oes")
+    C_phi = _getf(mod_sec, "C_phi", 1.0)
+    (isfinite(C_phi) && C_phi > 0) || error("model.C_phi must be finite and > 0. Got: $C_phi")
+    # De_mode (2026-10-17 pm): "input" keeps λ₀/λ_Z = ζ₀/ζ_Z from the drag model; "cu_fit"
+    # anchors it to RP's ansatz λ₀/λ_Z = (1 + φ^p)^(1/p), p = p_phi (fitted to SAOS).
+    De_mode_str = lowercase(_gets(mod_sec, "De_mode", "input"))
+    De_mode = De_mode_str == "input" ? :input : De_mode_str == "cu_fit" ? :cu_fit :
+              error("model.De_mode must be \"input\" or \"cu_fit\". Got: \"$De_mode_str\"")
+    if De_mode === :cu_fit && !(drag_interp in (:cu, :oescui, :barecui))
+        p_phi = _getf(mod_sec, "p_phi", DEFAULT_P_PHI)
+        (isfinite(p_phi) && p_phi > 0) || error("model.p_phi must be finite and > 0 for De_mode = \"cu_fit\". Got: $p_phi")
+    end
+
     # ── Flow ──────────────────────────────────────────────────────────────────
-    av = get(flow_sec, "alphas", [-0.5, -0.5, 1.0])
-    length(av) == 3 || error("flow.alphas must have 3 entries")
-    alphas = (Float64(av[1]), Float64(av[2]), Float64(av[3]))
-    maximum(alphas) > 0 || error("flow.alphas must have at least one positive entry")
+    # kind = "styext" (default; principal extension, alphas) | "pmf" (planar
+    # mixed flow, κ = Wi·κ̂(r); r = 1 simple shear). For "pmf" the alphas are
+    # the strain-axes frame (1, −1, 0) and any TOML alphas are ignored.
+    flow_kind_str = lowercase(_gets(flow_sec, "kind", "styext"))
+    flow_kind = flow_kind_str in ("styext", "ext", "extension") ? :styext :
+                flow_kind_str in ("pmf", "shear", "mixed")       ? :pmf    :
+                error("flow.kind must be \"styext\" or \"pmf\". Got: \"$flow_kind_str\"")
+
+    if flow_kind === :pmf
+        r = _getf(flow_sec, "r", 1.0)
+        isfinite(r) && r >= 0 || error("flow.r must be finite and ≥ 0 for kind = \"pmf\". Got: $r")
+        alphas = (1.0, -1.0, 0.0)
+        haskey(flow_sec, "alphas") &&
+            @warn "flow.alphas ignored for kind = \"pmf\" (strain-axes frame (1,-1,0) is implied)"
+        Wi_conv_str = lowercase(_gets(flow_sec, "Wi_convention", "strain"))
+        Wi_convention = Wi_conv_str == "strain" ? :strain :
+                        Wi_conv_str == "shear"  ? :shear  :
+                        error("flow.Wi_convention must be \"strain\" or \"shear\". Got: \"$Wi_conv_str\"")
+        Wi_convention === :shear && r != 1.0 &&
+            error("flow.Wi_convention = \"shear\" (Wi = λ₀γ̇) is only defined for simple shear r = 1. Got r = $r")
+        flow = PlanarMixedFlow(r)
+    else
+        r = NaN
+        Wi_convention = :strain
+        av = get(flow_sec, "alphas", [-0.5, -0.5, 1.0])
+        length(av) == 3 || error("flow.alphas must have 3 entries")
+        alphas = (Float64(av[1]), Float64(av[2]), Float64(av[3]))
+        maximum(alphas) > 0 || error("flow.alphas must have at least one positive entry")
+        flow = PrincipalExtension(alphas)
+    end
+    # Input Wi values (limits.Wi_max, [sweep]) are divided by 2 under the
+    # "shear" convention so that the solver always works in report Wi.
+    Wi_in_scale = Wi_convention === :shear ? 0.5 : 1.0
 
     # ── Limits ────────────────────────────────────────────────────────────────
     Wi_max_raw = get(lim_sec, "Wi_max", 3.0)
     Wi_max = Wi_max_raw == "Inf" ? Inf :
              Wi_max_raw isa String ? parse(Float64, Wi_max_raw) : Float64(Wi_max_raw)
     Wi_max > 0 || error("limits.Wi_max must be > 0")
+    Wi_max *= Wi_in_scale
+
+    # ── [sweep]: fixed-Wi grid (optional) ─────────────────────────────────────
+    # Either an explicit list `Wi_values = [...]` or a log grid from
+    # `Wi_min`, `Wi_max`, `n_per_decade` (default 10). Stored in report Wi.
+    sweep_sec = _sec(d, "sweep")
+    Wi_sweep = Float64[]
+    if haskey(sweep_sec, "Wi_values")
+        Wi_sweep = Float64.(collect(sweep_sec["Wi_values"]))
+    elseif haskey(sweep_sec, "Wi_min") && haskey(sweep_sec, "Wi_max")
+        w0 = _getf(sweep_sec, "Wi_min", 1e-2);  w1 = _getf(sweep_sec, "Wi_max", 1e2)
+        npd = _getf(sweep_sec, "n_per_decade", 10.0)
+        w0 > 0 && w1 > w0 && npd > 0 || error("[sweep] needs 0 < Wi_min < Wi_max and n_per_decade > 0")
+        n = Int(round(npd * log10(w1 / w0))) + 1
+        Wi_sweep = exp10.(range(log10(w0), log10(w1); length = n))
+    end
+    all(w -> isfinite(w) && w >= 0, Wi_sweep) || error("[sweep] Wi values must be finite and ≥ 0")
+    Wi_sweep .*= Wi_in_scale
+
+    # ── Drag LUT resolution ───────────────────────────────────────────────────
+    # Default 4000 for the steady loader since 2026-10-16 (RP/Aru, KMR grid):
+    # the 400-point table (still the kernel/VELB default in build_drag_assessor)
+    # limits c2d2 accuracy to ~1e-5 near E ≈ 1. Set 400 explicitly to reproduce
+    # pre-2026-10-16 steady outputs bit-for-bit.
+    drag_lut_n_points = _geti(mod_sec, "drag_lut_n_points", 4000)
+    drag_lut_n_points >= 4 || error("model.drag_lut_n_points must be ≥ 4")
 
     max_frac_stretch_sq = _getf(lim_sec, "max_frac_stretch_sq", 0.999)
     0.0 < max_frac_stretch_sq < 1.0 ||
@@ -249,15 +356,24 @@ function load_styext_context(toml_path :: AbstractString;
     Einf    = bK * NK          # = Q0 * sqrt(NK*Nm)
     Einf_sq = Einf^2           # = Q0_sq * NK * Nm
 
-    # FENE pole: STYEXT convention (differs from VELB for Nm>1)
-    Qinf_sq = fe_model === :fenepme ? Q0_sq * NK : Q0_sq * NK / Nm
+    # FENE pole: STYEXT convention (differs from VELB for Nm>1).
+    #   FENE-PME : Q∞² = Q₀²·NK        (whole-chain argument Y/Nm)
+    #   FENE-PM/P: Q∞² = Q₀²·NK/Nm     (per-spring argument)
+    #   Hookean  : no pole; value stored for bookkeeping only (f ≡ 1).
+    # Params.jl (VELB) uses Q₀²·NK for every model, so the two paths silently
+    # differ for Nm > 1. Reference data (MATLAB STYEXT, Python PMF port) follow
+    # THIS convention.
+    Qinf_sq = fe_model in (:fenepme, :hookean) ? Q0_sq * NK : Q0_sq * NK / Nm
 
     c_star = E0^(-3)
-    conc   = phi * c_star
+    conc   = phi * c_star / C_phi      # c = φ/(C_phi E₀³)  (C_phi = 1: historical)
     ckBT   = conc * kBT
 
     # ── Build drag LUT and spectrum assessor ──────────────────────────────────
-    drag_lut = build_drag_assessor(phi, hK_star, NK, drag_model, draining_model)
+    drag_lut = build_drag_assessor(phi, hK_star, NK, drag_model, draining_model;
+                                   n_points=drag_lut_n_points,
+                                   drag_interp=drag_interp, p_phi=p_phi,
+                                   g0_1D=g0_1D, s_form=s_form, q_oes=q_oes)
 
     spectrum = build_spectrum_assessor(
         spectrum_model = spectrum_model,
@@ -267,12 +383,22 @@ function load_styext_context(toml_path :: AbstractString;
         phi            = phi,
         drag_model     = drag_model,
         draining_model = draining_model,
+        drag_interp    = drag_interp,
+        p_phi          = p_phi,
+        g0_1D          = g0_1D,
+        s_form         = s_form,
+        q_oes          = q_oes,
     )
 
     # ── Equilibrium drag ratio → lambdaZ → etas ───────────────────────────────
     # Equilibrium: E = 1 (coiled state; matches MATLAB's r=sqrt(Y)/E0=1)
-    Gam_eq, _ = drag_ratio_zimm(1.0, phi, hK_star, NK, drag_model, draining_model)
+    Gam_eq, _ = drag_ratio_zimm(1.0, phi, hK_star, NK, drag_model, draining_model;
+                                drag_interp=drag_interp, p_phi=p_phi,
+                                g0_1D=g0_1D, s_form=s_form, q_oes=q_oes)   # λ₀/λ_Z incl. g(s₀) for CU
     Gam_eq > 0 || error("Equilibrium drag ratio must be > 0; got $Gam_eq")
+    # λ₀/λ_Z: model-anchored (1+φ^p)^(1/p) under cu_fit; otherwise the drag-model value
+    # (ζ₀/ζ_Z incl. g(s₀) for CU). Sets ηₛ via λ_Z and hence the Trouton ratio scale.
+    De_mode === :cu_fit && (Gam_eq = cu_lambda0_ratio(phi, p_phi))
     lambdaZ = lambda0 / Gam_eq
 
     etas = _etas_from_lambdaZ(lambdaZ, kBT, E0, hK_star, NK, draining_model)
@@ -291,10 +417,12 @@ function load_styext_context(toml_path :: AbstractString;
     # ── Portable StyextParams ─────────────────────────────────────────────────
     params = StyextParams(
         run_label, NK, Nm, hK_star, Q0_sq, kBT, lambda0,
-        phi, fe_model, drag_model, draining_model, spectrum_model,
+        phi, fe_model, drag_model, draining_model, drag_interp, p_phi, spectrum_model,
         alphas, Wi_max, max_frac_stretch_sq,
         E0_sq, Einf_sq, Q0, E0, Qinf_sq,
         ckBT, etas, Gam_eq, lambdaZ, Sp,
+        flow_kind, r, Wi_convention, Wi_sweep, drag_lut_n_points,
+        g0_1D, s_form, C_phi, De_mode, q_oes,
     )
 
     # ── Runtime StyextMPCtx ───────────────────────────────────────────────────
@@ -305,7 +433,8 @@ function load_styext_context(toml_path :: AbstractString;
         kernel, Sp, alphas, Na, Nm,
         E0_sq, Ymax_ctx,
         Q0_sq, Qinf_sq,
-        lambda0, etas, ckBT,
+        lambda0, etas, ckBT;
+        flow = flow,
     )
 
     # ── SolverOpts ────────────────────────────────────────────────────────────
@@ -352,6 +481,10 @@ function load_styext_context(toml_path :: AbstractString;
         target_newton   = _geti(newt_sec, "target_newton", 10),
         target_rho      = _getf(newt_sec, "target_offmanifold_ratio", 0.3),
         verbose         = false,
+        # X-closure stop (FENE-PM/P only): same fraction as Y_stop, applied to Q∞².
+        # For Nm = 1, X ≡ Y so this coincides with Y_stop; for Nm > 1 it is the
+        # criterion that actually fires (Y saturates below E∞²). Hookean/PME: off.
+        X_stop          = Na > 0 ? max_frac_stretch_sq * Qinf_sq : Inf,
     )
 
     return params, mp_ctx, solver_opts, man_opts
