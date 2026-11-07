@@ -15,8 +15,11 @@ version: "1.1.1"
 date-released: "2026-11-07"
 identifiers:
   - type: doi
+    value: "10.5281/zenodo.24033584"
+    description: "Archived software (this version, v1.1.1)"
+  - type: doi
     value: "10.5281/zenodo.23848153"
-    description: "Archived software (this version, v1.1.0)"
+    description: "Archived software, v1.1.0"
   - type: doi
     value: "10.5281/zenodo.21089959"
     description: "Concept DOI (resolves to the latest version)"

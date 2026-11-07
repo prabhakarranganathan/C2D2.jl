@@ -63,6 +63,8 @@ release and documented as it is.
 - The `K_til` field of `UsyextPoint` holds φ·Γ_eq·U_z for the viscocapillary
   flow and φ·U_R for the inertiocapillary flow.
 
+Archived at [10.5281/zenodo.24033584](https://doi.org/10.5281/zenodo.24033584).
+
 ## [1.1.0] — 2026-11-01
 
 **If you used v1.0.0:** nothing you have changes. Every default is the same,
