@@ -2,8 +2,8 @@
     StyextModelPack.jl
 
 Model-pack for the steady homogeneous-flow PAC solver: steady extension
-(STYEXT) and, since 2026-10-16, steady planar mixed flows (PMF; simple shear
-at r = 1). The flow kinematics are carried by `ctx.flow`
+(STYEXT) and steady planar mixed flows (PMF; simple shear at r = 1); technical
+report Ch. 3. The flow kinematics are carried by `ctx.flow`
 (`StyextFlows.PrincipalExtension` | `StyextFlows.PlanarMixedFlow`); everything
 else — closure scalars, PAC/fixed-Y/fixed-Wi residuals, Newton and the
 manifold builder — is shared.

@@ -8,11 +8,16 @@ Implements the formula used by both STYEXT (steady extension) and USYEXT
   styext_polymer_stress.m / usyext_polymer_stress.m
 (the two MATLAB files are identical in physics).
 
-Convention
-----------
-The polymer contribution to the stress tensor, divided by c kBT, is:
+Convention (technical report Sec. 2.4)
+--------------------------------------
+The polymer contribution to the stress tensor, divided by c k_BT (c the number
+density of chains), is, for each diagonal component α:
 
     τ_α = -Σ_p ( 3 f_p M_{p,α} - 1 )
+
+The sign is compressive-positive (τ_zz < 0 along the stretching axis).  The
+material functions in StateObs.jl and StyextModelPack.jl carry the compensating
+minus sign, so extensional viscosities, η_p and Ψ₁ come out positive.
 
 where
   M_diag : Nm×3  (columns = xx, yy, zz in the principal flow frame)

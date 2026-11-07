@@ -1,0 +1,57 @@
+# Capillary thinning (CaBER-type) of a dilute solution, viscocapillary limit.
+#
+# Run with:  julia julia/examples/run_usyext_example.jl
+# Every key is explained in docs/input_reference.md; the values here are those
+# of the regression reference case usyext_ref_01 (FENE-PM, 1 mode, constant drag,
+# phi = 0.03, De = 1).  Keys you delete fall back to the defaults in the comments.
+# For start-up of extension at fixed Wi set [flow] kind = "constant" and Wi.
+
+[polymer]
+NK      = 3000                    # N_K, Kuhn segments per chain                                     [default 5000]
+Nm      = 1                       # N_m, number of modes                                             [default 1]
+hK_star = 0.05                    # h*_K, hydrodynamic-interaction parameter of a Kuhn segment       [default 0.25]
+Q0_sq   = 1.0                     # keep 1.0
+kBT     = 1.0                     # keep 1.0
+lambda0 = 1.0                     # equilibrium longest relaxation time, the time unit; keep 1.0
+
+[concentration]
+phi = 0.03                        # overlap ratio c/c*                                               [default 1.0]
+
+[model]
+fe_model        = "fenepm"        # "fenepme" | "fenepm" | "fenep"  (no "hookean" in the transient solver)  [default "fenepme"]
+drag_model      = "constant"      # "constant" | "c1d2" | "c2d2"                                     [default "c2d2"]
+draining_model  = "partialdraining"   # "partialdraining" | "nondraining"                            [default "partialdraining"]
+spectrum_model  = "auto"          # "auto" = Rouse spectrum for constant drag, blob spectrum for c2d2
+# drag_interp     = "OESCUI"      # C2D2 drag only: "RP" (default) | "BAREI" | "BARECUI" | "OESI" | "OESCUI"
+# q_oes           = 0.25          # "OESI"/"OESCUI" only: stretch-delayed shielding exponent         [default 0.0]
+# C_phi           = 1.0           # overlap constant                                                 [default 1.0]
+
+[flow]
+kind      = "caber"               # "caber" viscocapillary (Oh >> 1) | "caber_inertial" (Oh << 1, needs Oh) | "constant"  [default "caber"]
+De        = 1.0                   # Deborah number lambda_{1,0} / t_v, t_v = eta_s R0 / gamma the viscocapillary time
+                                  # (for "caber_inertial": lambda_{1,0} / t_R with the Rayleigh time t_R)   [default 1.0]
+alphas    = [-0.5, -0.5, 1.0]     # uniaxial extension along z                                       [default]
+# Oh        = 0.005               # "caber_inertial" only: Ohnesorge number of the solvent           [default 0.005]
+# Wi        = 1.0                 # "constant" only: the fixed Weissenberg number                    [default 1.0]
+
+[limits]
+max_frac_stretch_sq = 0.95        # stop once E^2 reaches this fraction of its maximum N_K           [default 0.999]
+
+[integration]                     # adaptive exponential time-differencing integrator
+independent               = "auto"   # step in "strain", in "time", or "auto" (time when Wi is small)   [default "strain"]
+strain_max                = 25.0  # final Hencky strain (R/R0 = exp(-strain/2))                      [default 6.0]
+dstrain_init              = 1e-3  # first strain step                                                [default 1e-3]
+dstrain_min               = 1e-9  # smallest strain step                                             [default 1e-8]
+dstrain_max               = 5e-2  # largest strain step                                              [default 5e-2]
+rtol                      = 1e-7  # relative error tolerance                                         [default 1e-7]
+atol                      = 1e-9  # absolute error tolerance                                         [default 1e-9]
+Wi_min_strain_independent = 0.0   # "auto": step in time below this Wi                               [default 0.0]
+dt_init                   = 1e-3  # first time step                                                  [default 1e-3]
+
+[output]
+sample_mode = "strain_grid"       # one output row every dstrain_out                                 [default "strain_grid"]
+dstrain_out = 0.05                # strain spacing of the output rows                                [default 1e-2]
+
+[initial_condition]
+kind                = "equilibrium"   # "equilibrium" | "uniaxial_affine" (chains pre-stretched)     [default "equilibrium"]
+micro_affine_strain = 0.0         # pre-strain for "uniaxial_affine"                                 [default 0.0]

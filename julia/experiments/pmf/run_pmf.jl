@@ -15,11 +15,12 @@ Usage (from repo root):
 With no TOML arguments every `pmf_*.toml` in julia/experiments/pmf/inputs/ is run.
 Outputs go to julia/experiments/pmf/outputs/<label>/<timestamp>/ (gitignored).
 
-Conventions (see StyextFlows.jl / SteadyWiSweep.jl)
-  * `Wi` columns are the report-appendix Wi (λ₀ × principal strain rate);
-    `Wi_shear = 2·Wi = λ₀γ̇` is the conventional shear Weissenberg number.
-  * TOML `[flow] Wi_convention = "shear"` lets [sweep]/[limits] Wi be given as λ₀γ̇.
+Conventions (see StyextFlows.jl / SteadyWiSweep.jl; technical report Sec. 3.2.2)
+  * `Wi` columns are the report's Wi (λ₁,₀ × principal strain rate);
+    `Wi_shear = 2·Wi = λ₁,₀γ̇` is the conventional shear Weissenberg number.
+  * TOML `[flow] Wi_convention = "shear"` lets [sweep]/[limits] Wi be given as λ₁,₀γ̇.
   * Stresses follow Stress.jl: τ/(c kBT) = −Σ(3f_pM_p − I); η_p, Ψ₁, Ψ₂ are positive.
+  * Output columns are documented in docs/output_reference.md.
 """
 
 using Dates

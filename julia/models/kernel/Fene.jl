@@ -1,23 +1,30 @@
 """
     Fene.jl
 
-FENE finite-extensibility kernel for the multimode C2D2 model.
+Finite-extensibility (FENE, finitely extensible nonlinear elastic) spring-law
+kernel for the multimode C2D2 model: the mode-effective Peterlin factors f_p that
+multiply the spring force of each mode (technical report Sec. 2.3 and Appendix A).
 
-Four spring-law variants are supported, selected by the `fe_model` field of `C2D2Params`:
-  - `:hookean`  Hookean   (f=1 identically, Na=0, O(Nm) cost; `:oldroyd_b` is a legacy alias)
-  - `:fenepme`  FENE-PME  (Na=0 auxiliary vars, O(Nm) cost)
-  - `:fenepm`   FENE-PM   (Na=1 auxiliary var,  O(Nm) cost)
-  - `:fenep`    FENE-P    (Na=Nm auxiliary vars, O(Nm²) cost, TFNA-inspired)
+Four spring laws are supported, selected by the TOML key `[model] fe_model`:
+  - `"hookean"`  Hookean: f = 1 for every mode (no finite extensibility; Na = 0;
+                 `"oldroyd_b"` is a legacy alias)
+  - `"fenepme"`  FENE-PME: one Peterlin factor for the whole chain, from the
+                 chain's mean-square end-to-end distance E² (Na = 0)
+  - `"fenepm"`   FENE-PM: one Peterlin factor from the mean modal trace (Na = 1)
+  - `"fenep"`    FENE-P: a factor per mode, through the Rouse weight matrix
+                 (Na = Nm; the most faithful and the most expensive, O(Nm²))
+Na is the number of auxiliary closure variables X the steady solver carries.
 
-The FE-model choice (spring law) and drag-model choice are separate architectural axes.
-A Hookean spring law combined with configuration-dependent drag (C2D2 drag) is a valid
-model branch, but should not be called classical Oldroyd-B (which assumes constant drag).
+The spring law and the drag model are independent choices.  A Hookean spring
+law combined with conformation-dependent (C2D2) drag is a valid model, but it is
+not the classical Oldroyd-B model, which assumes constant drag.
 
 Public API
 ----------
   fene_peterlin(chi, Q0_sq, Qinf_sq)       -> (fval, df_dchi)
-  eval_fene(model, Xa, Y, ctx)              -> FeneResult
+  eval_fene(model, Xa, Y; want_derivs)     -> FeneResult
   na_for_model(fe_model, Nm)               -> Int
+  build_fene_model(fe_model, Nm, Q0_sq, Qinf_sq) -> model struct
 
 All functions are pure (no mutation, no globals).
 """
@@ -74,7 +81,9 @@ struct Hookean <: AbstractFeneModel
 end
 
 """
-FENE-P: TFNA-inspired mode-effective factor using the full Rouse weight matrix W = Π⊙Π.
+FENE-P: mode-effective factors f_p built from the spring-wise Peterlin factors through
+the Rouse weight matrix W = Π⊙Π (report Appendix A, which motivates this closure from
+the TFNA, "two-fluid normal-mode analysis", approach).
 Na = Nm. O(Nm²) cost (dense Jacobian when requested).
 The weight matrix W is precomputed at construction time.
 """
@@ -151,13 +160,15 @@ end
 """
     fene_peterlin(chi, Q0_sq, Qinf_sq) -> (fval, df_dchi)
 
-Scalar FENE-P Peterlin spring law and its derivative.
-Strict fail-fast at the pole: throws if any chi ≥ Qinf_sq.
+Scalar Peterlin spring-force factor and its derivative (report Sec. 2.3):
 
-  f(χ) = (Q∞² - Q₀²) / (Q∞² - χ)
-  df/dχ = (Q∞² - Q₀²) / (Q∞² - χ)²
+  f(χ) = (Q∞² − Q₀²) / (Q∞² − χ)
+  df/dχ = (Q∞² − Q₀²) / (Q∞² − χ)²
 
-Works element-wise on arrays.
+χ is the mean-square spring (or chain) extension, Q₀² its equilibrium value and
+Q∞² the fully extended value (the pole), all in the same units.  Throws if any
+chi ≥ Qinf_sq (the spring would be beyond full extension).  Works element-wise
+on arrays.
 """
 function fene_peterlin(chi::Real, Q0_sq::Float64, Qinf_sq::Float64)
     chi >= Qinf_sq && throw(ArgumentError(

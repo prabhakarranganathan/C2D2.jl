@@ -7,15 +7,16 @@ Mirrors the observable computation in MATLAB's
   styext_state_obs.m / usyext_state_obs.m
 (both compute the same extensional-viscosity and Trouton-ratio formulas).
 
-Formulas
---------
+Formulas (technical report Sec. 2.4)
+------------------------------------
 Given τ/(c kBT) components (from Stress.polymer_stress), flow parameters Wi,
-alphas, and material scales lambda0, etas, ckBT:
+alphas, and material scales lambda0 (= λ₁,₀, the equilibrium longest relaxation
+time), etas (solvent viscosity η_s) and ckBT:
 
     strain_rate  = Wi / lambda0
     etaE         = -(τ_ext - τ_comp) / (strain_rate × lambda0)
-                 = -(τ_ext - τ_comp) / Wi             [simplifies]
-    Tr           = etaE × ckBT × lambda0 / (3 etas)
+                 = -(τ_ext - τ_comp) / Wi             [polymer extensional viscosity in units of c kBT λ₁,₀]
+    Tr           = etaE × ckBT × lambda0 / (3 etas)   [Trouton ratio: polymer extensional viscosity over 3 η_s]
 
 The extensional axis is argmax(alphas); the two compressive axes are the
 remaining indices.
@@ -52,12 +53,12 @@ tau_yy  : τ_yy / (c kBT)
 tau_zz  : τ_zz / (c kBT)
 status  : :ok | :nan_wi (NaN etaE when Wi ≈ 0)
 
-Shear / planar-mixed-flow fields (2026-10-16; NaN for extensional flows)
+Shear / planar-mixed-flow fields (NaN for extensional flows)
 ------------------------------------------------------------------------
 tau_xy  : τ_xy / (c kBT) in the Fuller–Leal flow frame (lab shear frame at r=1)
-eta_p   : polymer shear viscosity  −τ_xy/(λ₀γ̇)   [units c kBT λ₀]
-Psi1    : first normal-stress coefficient  −(τ_xx − τ_yy)/(λ₀γ̇)²  [units c kBT λ₀²]
-Psi2    : second normal-stress coefficient −(τ_yy − τ_zz)/(λ₀γ̇)²
+eta_p   : polymer shear viscosity  −τ_xy/(λ₁,₀γ̇)   [units c kBT λ₁,₀]
+Psi1    : first normal-stress coefficient  −(τ_xx − τ_yy)/(λ₁,₀γ̇)²  [units c kBT λ₁,₀²]
+Psi2    : second normal-stress coefficient −(τ_yy − τ_zz)/(λ₁,₀γ̇)²
 For a PlanarMixedFlow the tau_xx/yy/zz/xy stored here are flow-frame components;
 etaE1/etaE2 are the strain-frame planar extensional viscosities (same definition
 as STYEXT planar extension, so PMF r=0 reproduces STYEXT α=(1,−1,0)).
@@ -99,9 +100,9 @@ Wi      : Weissenberg number
 E2      : E² value (microstructure norm squared)
 tau     : NamedTuple (xx, yy, zz) of τ/(c kBT) components  [from polymer_stress]
 alphas  : 3-element vector; extensional axis = argmax(alphas)
-lambda0 : longest relaxation time [time units]
-etas    : solvent viscosity
-ckBT    : c kB T  (concentration × thermal energy)
+lambda0 : λ₁,₀, the equilibrium longest relaxation time (the time unit)
+etas    : solvent viscosity η_s
+ckBT    : c kB T  (chain number density × thermal energy; the stress unit)
 status  : optional tag; forced to :nan_wi when Wi ≈ 0 (default :ok)
 
 Formulas

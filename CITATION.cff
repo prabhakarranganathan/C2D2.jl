@@ -11,8 +11,8 @@ authors:
 repository-code: "https://github.com/prabhakarranganathan/C2D2.jl"
 url: "https://github.com/prabhakarranganathan/C2D2.jl"
 license: MIT
-version: "1.1.0"
-date-released: "2026-11-01"
+version: "1.1.1"
+date-released: "2026-11-07"
 identifiers:
   - type: doi
     value: "10.5281/zenodo.23848153"

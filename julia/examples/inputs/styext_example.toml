@@ -1,0 +1,63 @@
+# Steady uniaxial extension (STYEXT) with the C2D2 drag.
+#
+# Run with:  julia julia/examples/run_styext_example.jl
+# Every key is explained in docs/input_reference.md; the values here are those
+# of the regression reference case styext_ref_02 (FENE-PM, 3 modes, phi = 0.1).
+# Keys you delete fall back to the defaults given in the comments.
+
+[run]
+label = "styext_example"          # run name (the example script chooses the output folder)
+
+[polymer]
+NK      = 3000                    # N_K, Kuhn segments per chain (sets the finite extensibility)   [default 5000]
+Nm      = 3                       # N_m, number of modes (springs)                                   [default 1]
+hK_star = 0.05                    # h*_K, hydrodynamic-interaction parameter of a Kuhn segment (0 < h*_K < 0.5)  [default 0.25]
+Q0_sq   = 1.0                     # equilibrium mean-square spring length; keep 1.0
+kBT     = 1.0                     # thermal energy; keep 1.0
+lambda0 = 1.0                     # equilibrium longest relaxation time, the time unit; keep 1.0
+
+[concentration]
+phi = 0.1                         # overlap ratio c/c* (0 = dilute, 1 = overlap)                    [default 1.0]
+
+[model]
+fe_model        = "fenepm"        # spring law: "hookean" | "fenepme" | "fenepm" | "fenep"          [default "fenepme"]
+drag_model      = "c2d2"          # "constant" | "c1d2" (stretch only) | "c2d2" (stretch and concentration)  [default "c2d2"]
+draining_model  = "partialdraining"   # "partialdraining" (draining function of h*_K) | "nondraining"  [default "partialdraining"]
+spectrum_model  = "auto"          # relaxation spectrum; "auto" = blob spectrum for c2d2 drag, Rouse for constant drag
+drag_interp     = "RP"            # how the C2D2 drag joins its two limits: "RP" original (default),
+                                  # "BAREI"/"BARECUI" bare-blob model, "OESI"/"OESCUI" shielded-blob model
+# p_phi           = 2.0           # blending exponent of the "...CUI" schemes                        [default 2.0]
+# q_oes           = 0.0           # stretch-delayed shielding exponent of "OESI"/"OESCUI" (0 to 1)    [default 0.0]
+# C_phi           = 1.0           # overlap constant in phi = C_phi c E0^3                           [default 1.0]
+# drag_lut_n_points = 4000        # points of the drag look-up table in E                           [default 4000]
+
+[flow]
+kind   = "styext"                 # "styext" shear-free extension | "pmf" planar mixed flow (shear)  [default "styext"]
+alphas = [-0.5, -0.5, 1.0]        # principal strain-rate ratios; this is uniaxial extension along z [default]
+
+[limits]
+Wi_max              = 5.0         # stop once Wi exceeds this ("Inf" for no limit)                   [default 3.0]
+max_frac_stretch_sq = 0.999       # stop once E^2 reaches this fraction of its maximum N_K           [default 0.999]
+
+[continuation]                    # pseudo-arclength continuation along the steady-state curve
+max_steps = 5000                  # maximum number of points                                         [default 5000]
+ds0       = 0.001                 # initial arclength step                                           [default 1e-3]
+ds_min    = 1e-8                  # smallest step before stopping                                    [default 1e-8]
+ds_max    = 100.0                 # largest step                                                     [default 1e3]
+
+[newton]                          # Newton iteration with Armijo line search at each point
+tol_res                  = 1e-8   # residual tolerance                                               [default 1e-8]
+max_newton               = 15     # maximum iterations per point                                     [default 15]
+target_newton            = 10     # iterations per point the step-size control aims for             [default 10]
+target_offmanifold_ratio = 0.3    # predictor-corrector distance ratio it aims for                   [default 0.3]
+min_denom_tol            = 0.0    #                                                                  [default 0.0]
+tol_J_cond               = 1e-12  # Jacobian treated as singular below this reciprocal condition number [default 1e-12]
+use_armijo               = true   #                                                                  [default true]
+armijo_c1                = 1e-4   #                                                                  [default 1e-4]
+armijo_beta              = 0.5    #                                                                  [default 0.5]
+max_bt                   = 30     #                                                                  [default 30]
+
+[newton_fixed_Y]                  # fallback solve at fixed stretch when the arclength step fails
+max_newton_fixed_Y = 15           #                                                                  [default = max_newton]
+tol_FY_rel_hard    = 100.0        # relative residual above which the run stops                      [default 100.0]
+tol_FY_rel_soft    = 1e-2         # relative residual above which a point is marked not converged    [default 1e-2]

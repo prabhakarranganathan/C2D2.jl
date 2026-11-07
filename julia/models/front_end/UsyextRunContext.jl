@@ -1,28 +1,30 @@
 """
     UsyextRunContext.jl
 
-Context assembly for the USYEXT (unsteady extension) ETDRK2 integrator.
+Context assembly for the USYEXT (unsteady extension) integrator: reads a TOML
+input file and builds everything `UsyextIntegrator.integrate_usyext` needs.
+Every key, its meaning and its default are listed in docs/input_reference.md.
 
-Mirrors MATLAB's usyext_run_context.m.
-
-Reads a TOML file and builds:
+Builds:
   - UsyextCtx       : runtime polymer model context (kernel + derived scales)
-  - Flow            : ConstantWiFlow | CaberFlow
+  - Flow            : ConstantWiFlow | CaberFlow | CaberInertialFlow
   - IntegrationPlan : compiled sampling schedule
   - TolOpts         : adaptive controller tolerances
 
 Reuses the same polymer/drag/spectrum wiring as StyextRunContext
-(same kernel, same E₀ normalisation, same ηₛ formula).
+(same kernel, same E₀ normalisation, same η_s formula).
 
 TOML differences from STYEXT:
-  - flow.kind = "caber" | "constant"
+  - flow.kind = "caber" | "caber_inertial" | "constant"
   - flow.De (or flow.De_values[1]) instead of limits.Wi_max
-  - [integration] section for the ODE controller
+  - [integration] section for the step-size controller
   - [output] section for the sampling schedule
+  - [initial_condition] section (read by `build_initial_M`)
 
 Public API
 ----------
   load_usyext_context   — parse TOML → (UsyextCtx, flow, IntegrationPlan, TolOpts)
+  build_initial_M       — optional pre-stretched initial conformation from the TOML
 """
 module UsyextRunContext
 
@@ -104,11 +106,12 @@ end
 """
     _compute_U1(Gam_eq, hK_star, NK, draining_model) -> Float64
 
-Viscocapillary polymer prefactor `U_1 = λ₁ kT /(η_s R_eo³)` (TnW paper v4, Eq.
-for `U_1`). Equals `Γ_eq · U_z`, where `U_z = U_∞·(α_c/α_∞)` (`U_∞ = 0.325`),
-which is identically `λ₁ kT/(η_s R_eo³)` given the ηₛ formula used in this
-context. `U_1 → 0.325` as `N_K → ∞`. The old group `K̃ = φ·U_1` is now derived
-on demand inside `eval_flow`.
+Polymer prefactor of the capillary-thinning stress balance,
+U₁ = λ₁,₀ k_BT/(η_s E₀³) (report Sec. 4.5.1). Equals Γ_eq·U_Z, where
+Γ_eq = λ₁,₀/λ_Z and U_Z = U_∞·(α_c/α_∞) with U_∞ = 0.325 (the Zimm universal
+ratio of a non-draining theta coil), which is identically λ₁,₀ k_BT/(η_s E₀³)
+given the η_s formula used in this context. U₁ → 0.325 in the dilute
+non-draining limit. The product φ·U₁ is formed inside `eval_flow`.
 """
 function _compute_U1(Gam_eq::Float64,
                      hK_star::Float64, NK::Float64,
@@ -170,10 +173,12 @@ Supported `kind`:
     (1/3)e^{-ε₀}`.  Applied to all modes (`apply_to_modes = "all"`).
 
 This affine map `M_ii = (1/3)exp(2αᵢε₀)` is the standard incompressible uniaxial
-affine deformation of an isotropic equilibrium coil. It reproduces MATLAB's
-reference routine `usyext_initial_M_diag.m` to machine precision (verified by Ko,
-2026-06-11, acceptance test C), so the `micro_affine_strain` convention matches
-the MATLAB pipeline.
+affine deformation of an isotropic equilibrium coil (the chains are stretched
+with the fluid before the flow starts).  `ctx` is the `UsyextCtx` returned by
+`load_usyext_context`; `eps0` overrides the TOML strain.
+
+Example: `M0 = build_initial_M("input.toml", ctx)` then
+`integrate_usyext(ctx, flow, plan, tol; M0 = M0)`.
 """
 function build_initial_M(toml_path::AbstractString, ctx;
                          eps0::Union{Float64,Nothing}=nothing)
@@ -205,18 +210,48 @@ end
 # ── Main loader ───────────────────────────────────────────────────────────────
 
 """
-    load_usyext_context(toml_path; De=nothing, phi=nothing)
-        -> (UsyextCtx, flow, IntegrationPlan, TolOpts)
+    load_usyext_context(toml_path; De=nothing, phi=nothing, phi_kw=nothing)
+        -> (ctx::UsyextCtx, flow, plan::IntegrationPlan, tol::TolOpts)
 
-Parse a USYEXT TOML file and assemble all runtime contexts.
+Parse a USYEXT TOML file (transient extension or capillary thinning) and
+assemble everything `integrate_usyext` needs.  The TOML keys, their meaning and
+their defaults are listed in docs/input_reference.md; a commented example is
+julia/examples/inputs/caber_example.toml.
 
-Optional keyword overrides:
-  De  : override flow.De (useful for sweeps)
-  phi : override concentration.phi
+Optional keyword overrides (useful for parameter sweeps from one file):
+  De     : overrides `[flow] De` (for kind = "caber_inertial" this is De_R)
+  phi    : overrides `[concentration] phi` (same spelling as `load_styext_context`)
+  phi_kw : older spelling of `phi`, kept for existing scripts; giving both with
+           different values is an error
+
+Returns
+-------
+ctx  : polymer model context (kernel, Rouse weights, scales λ₁,₀, η_s, c k_BT)
+flow : `ConstantWiFlow`, `CaberFlow` or `CaberInertialFlow` as selected by `[flow] kind`
+plan : sampling schedule and initial step sizes (`[integration]`, `[output]`)
+tol  : adaptive step-size controller tolerances (`[integration]`)
+
+Capillary-thinning inputs: for kind = "caber" the Deborah number De = λ₁,₀/t_v
+uses the viscocapillary time; for kind = "caber_inertial" De is the
+Rayleigh-time Deborah number De_R and `[flow] Oh` (the Ohnesorge number,
+default 0.005) is the second input, from which U_R = Oh·U₁/De_R is derived.
+`[flow] U_R` is a legacy override that is converted to the equivalent Oh.
+
+Example
+-------
+    ctx, flow, plan, tol = load_usyext_context("caber_example.toml"; De = 1.0)
+    traj = integrate_usyext(ctx, flow, plan, tol)
 """
 function load_usyext_context(toml_path :: AbstractString;
                               De        :: Union{Float64, Nothing} = nothing,
+                              phi       :: Union{Float64, Nothing} = nothing,
                               phi_kw    :: Union{Float64, Nothing} = nothing)
+
+    # `phi` and `phi_kw` are the same override; `phi_kw` is the older spelling.
+    if phi !== nothing && phi_kw !== nothing && phi != phi_kw
+        error("load_usyext_context: phi=$phi and phi_kw=$phi_kw disagree; give one of them")
+    end
+    phi_kw = phi !== nothing ? phi : phi_kw
 
     d = TOML.parsefile(toml_path)
 
@@ -273,23 +308,23 @@ function load_usyext_context(toml_path :: AbstractString;
     draining_model in (:partialdraining, :nondraining) ||
         error("draining_model must be partialdraining/nondraining. Got: $draining_model")
 
-    # drag_interp: "RP"/"RPI" (default; bit-identical to earlier inputs), "OESCUI", "OESI",
-    # "BARECUI", "BAREI" (and the archived "RPD"/"RPDW"/"RPDP"/"CU").  p_phi is read only for
-    # "CU"/"OESCUI"/"BARECUI"; otherwise at the scheme's default (1.86 CU, 2.0 CUI).
+    # drag_interp: "RP"/"RPI" (default, the original interpolation), "OESCUI", "OESI",
+    # "BARECUI", "BAREI" (and the archived "RPD"/"RPDW"/"RPDP"/"CU"); see Drag.jl.  p_phi is
+    # read only for "CU"/"OESCUI"/"BARECUI"; otherwise at the scheme's default (1.86 CU, 2.0 CUI).
     drag_interp = parse_drag_interp(_gets(mod_sec, "drag_interp", "RP"))
     p_phi       = drag_interp in (:cu, :oescui, :barecui) ? _getf(mod_sec, "p_phi", default_p_phi(drag_interp)) :
                                                             default_p_phi(drag_interp)
     drag_interp in (:cu, :oescui, :barecui) && !(isfinite(p_phi) && p_phi > 0) &&
         error("model.p_phi must be finite and > 0 for drag_interp = \"CU\"/\"OESCUI\"/\"BARECUI\". Got: $p_phi")
-    # g0_1D / s_form (CU only; 2026-10-17): U_1D relaxation factor g(s). C_phi: overlap
-    # constant in c = φ/(C_phi E₀³), read for all schemes. Defaults are bit-identical.
+    # g0_1D / s_form (archived CU scheme only): relaxation-time factor g(s). C_phi: overlap
+    # constant in c = φ/(C_phi E₀³), read for all schemes. The defaults change nothing.
     g0_1D  = drag_interp === :cu ? _getf(mod_sec, "g0_1D", DEFAULT_G0_1D) : DEFAULT_G0_1D
     s_form = (drag_interp === :cu && g0_1D != 1.0) ?
                  parse_s_form(_gets(mod_sec, "s_form", "sum")) : DEFAULT_S_FORM
     drag_interp === :cu && !(isfinite(g0_1D) && g0_1D > 0) &&
         error("model.g0_1D must be finite and > 0 for drag_interp = \"CU\" (1.0 = off). Got: $g0_1D")
-    # q_oes (2026-10-22 pm): stretch-delayed OES dressing exponent, ψ = min(φ/E^q, 1); OESI/OESCUI
-    # only, default 0 (bit-identical). The Thin-n-Win runs set 0.25 explicitly.
+    # q_oes: stretch-delayed shielding exponent, ψ = min(φ/E^q, 1); OESI/OESCUI only, default 0
+    # (shielding set by the overlap alone). Our capillary-thinning work sets 0.25 explicitly.
     is_oes = drag_interp in (:oesi, :oescui)
     q_oes  = is_oes ? _getf(mod_sec, "q_oes", DEFAULT_Q_OES) : DEFAULT_Q_OES
     !is_oes && haskey(mod_sec, "q_oes") &&
@@ -298,8 +333,9 @@ function load_usyext_context(toml_path :: AbstractString;
         error("model.q_oes must be finite and in [0, 1] for drag_interp = \"OESI\"/\"OESCUI\". Got: $q_oes")
     C_phi = _getf(mod_sec, "C_phi", 1.0)
     (isfinite(C_phi) && C_phi > 0) || error("model.C_phi must be finite and > 0. Got: $C_phi")
-    # De_mode (2026-10-17 pm): "input" keeps λ₀/λ_Z = ζ₀/ζ_Z from the drag model; "cu_fit"
-    # anchors it to RP's ansatz λ₀/λ_Z = (1 + φ^p)^(1/p), p = p_phi (fitted to SAOS).
+    # De_mode: "input" (default) keeps λ₁,₀/λ_Z = ζ₀/ζ_Z from the drag model; "cu_fit" (legacy,
+    # accepted with any drag_interp) replaces it by the Martin-type correlation
+    # λ₁,₀/λ_Z = (1 + φ^p)^(1/p), p = p_phi, wherever λ₁,₀/λ_Z enters (De, U₁, η_s).
     De_mode_str = lowercase(_gets(mod_sec, "De_mode", "input"))
     De_mode = De_mode_str == "input" ? :input : De_mode_str == "cu_fit" ? :cu_fit :
               error("model.De_mode must be \"input\" or \"cu_fit\". Got: \"$De_mode_str\"")
@@ -347,13 +383,15 @@ function load_usyext_context(toml_path :: AbstractString;
     Einf_sq = Einf^2
     Ymax    = max_frac_stretch_sq * Einf_sq
 
-    # FENE pole: STYEXT/USYEXT convention (differs from VELB for Nm>1)
+    # FENE pole (report Sec. 2.3): Q∞² = Q₀²·N_K for FENE-PME (whole-chain argument),
+    # Q₀²·N_K/N_m per spring for FENE-PM/P.  (The liquid-bridge solver's Params.jl uses
+    # N_K for every model, so the two differ for N_m > 1.)
     Qinf_sq = fe_model === :fenepme ? Q0_sq * NK : Q0_sq * NK / Nm
 
     c_star = E0^(-3)
     ckBT   = phi * c_star * kBT / C_phi      # c = φ/(C_phi E₀³)
-    # Stress-prefactor concentration seen by the CaBER stress balance (K̃ = φ_σ U_1 and
-    # the ψ switch); the drag/spectrum keep the true φ. C_phi = 1 → φ_σ = φ (historical).
+    # Overlap ratio seen by the CaBER stress balance (K̃ = φ_σ U₁ and the ψ switch); the
+    # drag and spectrum keep the true φ. C_phi = 1 → φ_σ = φ (the historical value).
     phi_stress = phi / C_phi
 
     # ── Drag LUT + spectrum ───────────────────────────────────────────────────
@@ -375,16 +413,17 @@ function load_usyext_context(toml_path :: AbstractString;
         q_oes          = q_oes,
     )
 
-    # ── Equilibrium drag + ηₛ ────────────────────────────────────────────────
-    # E=1 → equilibrium coil (matches MATLAB: r = √Y/E₀ = 1 at equilibrium)
+    # ── Equilibrium drag + η_s ───────────────────────────────────────────────
+    # E = 1 is the equilibrium coil.  Γ_eq = ζ₀/ζ_Z = λ₁,₀/λ_Z: the equilibrium longest
+    # relaxation time at this φ relative to its dilute (Zimm) value (report Sec. 2.2).
     Gam_eq, _ = drag_ratio_zimm(1.0, phi, hK_star, NK, drag_model, draining_model;
                                 drag_interp=drag_interp, p_phi=p_phi,
-                                g0_1D=g0_1D, s_form=s_form, q_oes=q_oes)   # λ₀/λ_Z incl. g(s₀) for CU
+                                g0_1D=g0_1D, s_form=s_form, q_oes=q_oes)   # incl. g(s₀) for CU
     Gam_eq > 0 || error("Equilibrium drag ratio must be > 0")
-    # λ₀/λ_Z: model-anchored (1+φ^p)^(1/p) under cu_fit (sets ηₛ and U₁ = Γ_eq·U_z);
-    # otherwise the drag-model value (ζ₀/ζ_Z incl. g(s₀) for CU).
+    # Legacy cu_fit: λ₁,₀/λ_Z = (1+φ^p)^(1/p) instead of the drag-model value; this sets
+    # η_s (through λ_Z = λ₁,₀/Γ_eq) and U₁ = Γ_eq·U_Z.
     De_mode === :cu_fit && (Gam_eq = cu_lambda0_ratio(phi, p_phi))
-    # [flow] De_Z (optional): with cu_fit, De = De_Z · λ₀/λ_Z overrides flow.De.
+    # [flow] De_Z (optional): with cu_fit, De = De_Z · λ₁,₀/λ_Z overrides flow.De.
     De_Z = _getf(flow_sec, "De_Z", NaN)
     if De_mode === :cu_fit && isfinite(De_Z)
         De_Z > 0 || error("flow.De_Z must be > 0. Got: $De_Z")
@@ -416,19 +455,18 @@ function load_usyext_context(toml_path :: AbstractString;
         flow_ctx = CaberFlow(De_val, alphas, phi_stress, U_1)
     elseif flow_kind == "caber_inertial"
         # De_val is interpreted as De_R (the Rayleigh-time Deborah number).
-        # X_R = inertio-capillary Newtonian end-plate factor (default 0.5115 ⇔
-        # Gaillard A≈0.47, 2X_R-1=2A³/9).
+        # X_R = inertiocapillary Newtonian end-plate factor (default 0.5115, from the
+        # self-similar prefactor A ≈ 0.47 of Gaillard et al.: 2X_R−1 = 2A³/9).
         X_R = _getf(flow_sec, "X_R", 0.5115)
         X_e = _getf(flow_sec, "Xe",  1.5)
         U_1 = _compute_U1(Gam_eq, hK_star, NK, draining_model)
 
-        # Oh is the PRIMARY inertial input (2026-06-12 pivot): U_R is not an
-        # independent constant — U_R = Oh·U_1/De_R (the relaxation time is
-        # carried by the solvent), formed per-evaluation inside eval_flow.
-        # Oh = 0 is the degenerate no-arrest (Keller–Miksis) limit and is
-        # allowed.  flow.U_R remains accepted as an explicit back-compat
-        # override, converted to the equivalent Oh = U_R·De_R/U_1 for THIS
-        # De_R only (a constant-U_R sweep is an unphysical fluid — prefer Oh).
+        # The Ohnesorge number Oh is the inertial input: U_R is not an independent
+        # constant but U_R = Oh·U₁/De_R (the relaxation time is carried by the
+        # solvent), formed per evaluation inside eval_flow.  Oh = 0 is the degenerate
+        # limit without polymer arrest and is allowed.  flow.U_R remains accepted as
+        # a legacy override; it is converted to the equivalent Oh = U_R·De_R/U₁ for
+        # THIS De_R only (a constant-U_R sweep does not correspond to one fluid; give Oh).
         U_R_in = _getf(flow_sec, "U_R", NaN)
         if isfinite(U_R_in) && U_R_in >= 0
             Oh_val = U_R_in * De_val / U_1

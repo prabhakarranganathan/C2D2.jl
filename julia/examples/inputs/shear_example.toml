@@ -1,0 +1,66 @@
+# Steady simple shear (planar mixed flow with r = 1), FENE-PM, C2D2 drag, dilute.
+#
+# Run with:  julia julia/examples/run_shear_example.jl
+# Every key is explained in docs/input_reference.md; the values here are those
+# of the regression case pmf_shear_N1_fenepm_c2d2 (julia/experiments/pmf/inputs/).
+# The fixed-Wi sweep over the [sweep] grid gives the shear viscosity and the
+# normal-stress coefficients at each Wi.
+
+[run]
+label = "shear_example"
+
+[polymer]
+NK      = 500                     # N_K, Kuhn segments per chain                                     [default 5000]
+Nm      = 1                       # N_m, number of modes                                             [default 1]
+hK_star = 0.25                    # h*_K, hydrodynamic-interaction parameter of a Kuhn segment       [default 0.25]
+Q0_sq   = 1.0
+kBT     = 1.0
+lambda0 = 1.0
+
+[concentration]
+phi = 0.0                         # overlap ratio; 0 = dilute limit                                  [default 1.0]
+
+[model]
+fe_model          = "fenepm"      # spring law                                                       [default "fenepme"]
+drag_model        = "c2d2"        # conformation-dependent drag (at phi = 0 it depends on stretch only)
+drag_interp       = "RP"          # original interpolation                                           [default "RP"]
+draining_model    = "nondraining" # alpha = alpha_inf everywhere                                     [default "partialdraining"]
+spectrum_model    = "rouse-scaling"   # p^-2 spectrum (irrelevant for one mode)                      [default "auto"]
+drag_lut_n_points = 4000          # drag look-up table resolution                                    [default 4000]
+
+[flow]
+kind          = "pmf"             # planar mixed flow                                                [default "styext"]
+r             = 1.0               # vorticity / strain-rate ratio: 1 = simple shear                  [default 1.0]
+Wi_convention = "shear"           # Wi values in this file are lambda_{1,0} * gammadot (twice the report's Wi)  [default "strain"]
+
+[limits]
+Wi_max              = 1e3         # stop for the continuation run (shear convention)                 [default 3.0]
+max_frac_stretch_sq = 0.999       #                                                                  [default 0.999]
+
+[sweep]                           # fixed-Wi sweep: a log grid of shear Weissenberg numbers
+Wi_min       = 1e-2
+Wi_max       = 1e3
+n_per_decade = 5                  #                                                                  [default 10]
+
+[continuation]
+max_steps = 5000
+ds0       = 0.001
+ds_min    = 1e-8
+ds_max    = 100.0
+
+[newton]
+tol_res                  = 1e-10  #                                                                  [default 1e-8]
+max_newton               = 30     #                                                                  [default 15]
+target_newton            = 10
+target_offmanifold_ratio = 0.3
+min_denom_tol            = 0.0
+tol_J_cond               = 1e-14  #                                                                  [default 1e-12]
+use_armijo               = true
+armijo_c1                = 1e-4
+armijo_beta              = 0.5
+max_bt                   = 30
+
+[newton_fixed_Y]
+max_newton_fixed_Y = 30
+tol_FY_rel_hard    = 100.0
+tol_FY_rel_soft    = 1e-2

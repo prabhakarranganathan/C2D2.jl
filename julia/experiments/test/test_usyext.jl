@@ -289,6 +289,25 @@ end
     end
 end
 
+# ── load_usyext_context: `phi` keyword alias of `phi_kw` (v1.1.1) ───────────
+
+@testset "load_usyext_context phi keyword alias" begin
+    toml_path = joinpath(_INPUTS, "usyext_ref_01.toml")   # file has phi = 0.03
+    ctx_file, _, _, _ = load_usyext_context(toml_path)
+    ctx_kw,   _, _, _ = load_usyext_context(toml_path; phi_kw = 0.5)
+    ctx_phi,  _, _, _ = load_usyext_context(toml_path; phi = 0.5)
+    ctx_both, _, _, _ = load_usyext_context(toml_path; phi = 0.5, phi_kw = 0.5)
+
+    # c k_BT is proportional to φ, so the override is visible on the context
+    @test ctx_kw.ckBT  == ctx_phi.ckBT
+    @test ctx_both.ckBT == ctx_phi.ckBT
+    @test ctx_phi.ckBT ≈ ctx_file.ckBT * (0.5 / 0.03)
+    # one keyword alone still behaves as before
+    @test ctx_kw.ckBT != ctx_file.ckBT
+    # the two spellings must agree when both are given
+    @test_throws ErrorException load_usyext_context(toml_path; phi = 0.5, phi_kw = 0.2)
+end
+
 # ── phi1phi2 cancellation regression ─────────────────────────────────────────
 #
 # Regression for the Taylor-threshold backport (2026-05-12).

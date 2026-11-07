@@ -1,21 +1,24 @@
 """
     StyextRunContext.jl
 
-Context assembly for the STYEXT (steady extension) PAC solver.
+Context assembly for the steady homogeneous-flow solver (STYEXT steady
+extension and planar mixed flows / steady shear): reads a TOML input file and
+builds everything `StyextManifold.build_manifold` and
+`SteadyWiSweep.sweep_fixed_Wi` need.  Every key, its meaning and its default
+are listed in docs/input_reference.md.
 
-Mirrors MATLAB's styext_run_context.m.
-
-Reads a TOML file and builds:
+Builds:
   - StyextParams  : portable (serialisable) parameter struct
   - StyextMPCtx   : runtime model-pack context (kernel + derived scales)
-  - SolverOpts    : Newton + Armijo controls
-  - ManifoldOpts  : PAC step-size + termination controls
+  - SolverOpts    : Newton + Armijo line-search controls
+  - ManifoldOpts  : continuation step-size + termination controls
 
-Key differences from the VELB RuntimeCtx (Params.jl):
-  - Qinf_sq for FENE-PM / FENE-P = Q₀² · NK / Nm  (VELB uses NK always)
-  - Z.E normalization in eval_coeffs! uses √Y/E₀ (equilibrium → E=1)
-  - ηₛ from Zimm formula: ηₛ = λ_Z · k_B·T / (U · E₀³)
-  - phi read from phi_values[1] if phi not explicit (TOML compat)
+Conventions:
+  - Qinf_sq for FENE-PM / FENE-P = Q₀² · NK / Nm (per spring); FENE-PME uses NK
+    (whole chain).  The liquid-bridge solver's Params.jl uses NK for every model.
+  - the drag/spectrum argument is E = √Y/E₀, so the equilibrium coil has E = 1
+  - η_s from the Zimm relation η_s = λ_Z k_BT/(U E₀³), with λ_Z = λ₁,₀/(ζ₀/ζ_Z)
+  - phi is read from phi_values[1] if phi is not given explicitly
   - spectrum "auto" → :rouse_full (constant drag) or :blob (c2d2 drag)
 
 Public API
@@ -77,18 +80,18 @@ struct StyextParams
     Gam_eq              :: Float64
     lambdaZ             :: Float64
     Sp                  :: Vector{Float64}
-    # ── steady planar mixed flow (2026-10-16) ─────────────────────────────────
+    # ── steady planar mixed flow ──────────────────────────────────────────────
     flow_kind           :: Symbol            # :styext | :pmf
     r                   :: Float64           # PMF flow-type (vorticity/strain); NaN for :styext
-    Wi_convention       :: Symbol            # :strain (report Wi) | :shear (λ₀γ̇ = 2·Wi; r = 1 only)
+    Wi_convention       :: Symbol            # :strain (report Wi) | :shear (λ₁,₀γ̇ = 2·Wi; r = 1 only)
     Wi_sweep            :: Vector{Float64}   # [sweep] Wi grid, strain convention (empty if absent)
     drag_lut_n_points   :: Int               # [model] drag_lut_n_points (steady default 4000; kernel default 400)
-    # ── U_1D relaxation factor + overlap constant (2026-10-17) ────────────────
+    # ── relaxation-time factor (archived CU scheme) + overlap constant ────────
     g0_1D               :: Float64           # CU only; 1.0 = off
     s_form              :: Symbol            # CU only; :sum (smooth N_c′) | :sum_hard
     C_phi               :: Float64           # c = φ/(C_phi E₀³); divides ckBT (all schemes)
-    De_mode             :: Symbol            # :input | :cu_fit (Gam_eq = λ₀/λ_Z = (1+φ^p)^(1/p))
-    q_oes               :: Float64           # stretch-delayed OES dressing exponent (OESI/OESCUI only; 0 = off)
+    De_mode             :: Symbol            # :input | :cu_fit (legacy: Gam_eq = λ₁,₀/λ_Z = (1+φ^p)^(1/p))
+    q_oes               :: Float64           # stretch-delayed shielding exponent (OESI/OESCUI only; 0 = off)
 end
 
 # ── TOML section helpers ──────────────────────────────────────────────────────
@@ -164,11 +167,28 @@ end
 
 """
     load_styext_context(toml_path; phi=nothing)
-        -> (StyextParams, StyextMPCtx, SolverOpts, ManifoldOpts)
+        -> (params::StyextParams, ctx::StyextMPCtx, solver_opts::SolverOpts, man_opts::ManifoldOpts)
 
-Parse a STYEXT TOML file and assemble the full runtime context.
+Parse a steady-flow TOML file (steady extension, or planar mixed flow / steady
+shear with `[flow] kind = "pmf"`) and assemble the full runtime context.  The
+TOML keys, their meaning and their defaults are listed in
+docs/input_reference.md; commented examples are
+julia/examples/inputs/styext_example.toml and shear_example.toml.
 
-If `phi` is provided it overrides the TOML concentration value.
+If `phi` is provided it overrides the TOML overlap ratio (`[concentration] phi`).
+
+Returns
+-------
+params      : the parameters as read, plus the derived scales (E₀, Q∞², c k_BT, η_s,
+              Γ_eq = λ₁,₀/λ_Z, λ_Z, the Rouse weights S_p)
+ctx         : model-pack context for `build_manifold` / `sweep_fixed_Wi`
+solver_opts : Newton controls (`[newton]`, `[newton_fixed_Y]`)
+man_opts    : continuation controls (`[continuation]`, `[limits]`)
+
+Example
+-------
+    params, ctx, solver_opts, man_opts = load_styext_context("styext_example.toml"; phi = 0.1)
+    traj = build_manifold(ctx, solver_opts, man_opts)
 """
 function load_styext_context(toml_path :: AbstractString;
                               phi       :: Union{Float64, Nothing} = nothing)
@@ -239,23 +259,23 @@ function load_styext_context(toml_path :: AbstractString;
     draining_model in (:partialdraining, :nondraining) ||
         error("draining_model must be partialdraining/nondraining. Got: $draining_model")
 
-    # drag_interp: "RP"/"RPI" (default; bit-identical to earlier inputs), "OESCUI", "OESI",
-    # "BARECUI", "BAREI" (and the archived "RPD"/"RPDW"/"RPDP"/"CU").  p_phi is read only for
-    # "CU"/"OESCUI"/"BARECUI"; otherwise at the scheme's default (1.86 CU, 2.0 CUI).
+    # drag_interp: "RP"/"RPI" (default, the original interpolation), "OESCUI", "OESI",
+    # "BARECUI", "BAREI" (and the archived "RPD"/"RPDW"/"RPDP"/"CU"); see Drag.jl.  p_phi is
+    # read only for "CU"/"OESCUI"/"BARECUI"; otherwise at the scheme's default (1.86 CU, 2.0 CUI).
     drag_interp = parse_drag_interp(_gets(mod_sec, "drag_interp", "RP"))
     p_phi       = drag_interp in (:cu, :oescui, :barecui) ? _getf(mod_sec, "p_phi", default_p_phi(drag_interp)) :
                                                             default_p_phi(drag_interp)
     drag_interp in (:cu, :oescui, :barecui) && !(isfinite(p_phi) && p_phi > 0) &&
         error("model.p_phi must be finite and > 0 for drag_interp = \"CU\"/\"OESCUI\"/\"BARECUI\". Got: $p_phi")
-    # g0_1D / s_form (CU only; 2026-10-17): U_1D relaxation factor g(s). C_phi: overlap
-    # constant in c = φ/(C_phi E₀³), read for all schemes. Defaults are bit-identical.
+    # g0_1D / s_form (archived CU scheme only): relaxation-time factor g(s). C_phi: overlap
+    # constant in c = φ/(C_phi E₀³), read for all schemes. The defaults change nothing.
     g0_1D  = drag_interp === :cu ? _getf(mod_sec, "g0_1D", DEFAULT_G0_1D) : DEFAULT_G0_1D
     s_form = (drag_interp === :cu && g0_1D != 1.0) ?
                  parse_s_form(_gets(mod_sec, "s_form", "sum")) : DEFAULT_S_FORM
     drag_interp === :cu && !(isfinite(g0_1D) && g0_1D > 0) &&
         error("model.g0_1D must be finite and > 0 for drag_interp = \"CU\" (1.0 = off). Got: $g0_1D")
-    # q_oes (2026-10-22 pm): stretch-delayed OES dressing exponent, ψ = min(φ/E^q, 1); OESI/OESCUI
-    # only, default 0 (bit-identical). The Thin-n-Win runs set 0.25 explicitly.
+    # q_oes: stretch-delayed shielding exponent, ψ = min(φ/E^q, 1); OESI/OESCUI only, default 0
+    # (shielding set by the overlap alone). Our capillary-thinning work sets 0.25 explicitly.
     is_oes = drag_interp in (:oesi, :oescui)
     q_oes  = is_oes ? _getf(mod_sec, "q_oes", DEFAULT_Q_OES) : DEFAULT_Q_OES
     !is_oes && haskey(mod_sec, "q_oes") &&
@@ -264,8 +284,9 @@ function load_styext_context(toml_path :: AbstractString;
         error("model.q_oes must be finite and in [0, 1] for drag_interp = \"OESI\"/\"OESCUI\". Got: $q_oes")
     C_phi = _getf(mod_sec, "C_phi", 1.0)
     (isfinite(C_phi) && C_phi > 0) || error("model.C_phi must be finite and > 0. Got: $C_phi")
-    # De_mode (2026-10-17 pm): "input" keeps λ₀/λ_Z = ζ₀/ζ_Z from the drag model; "cu_fit"
-    # anchors it to RP's ansatz λ₀/λ_Z = (1 + φ^p)^(1/p), p = p_phi (fitted to SAOS).
+    # De_mode: "input" (default) keeps λ₁,₀/λ_Z = ζ₀/ζ_Z from the drag model; "cu_fit" (legacy,
+    # accepted with any drag_interp) replaces it by the Martin-type correlation
+    # λ₁,₀/λ_Z = (1 + φ^p)^(1/p), p = p_phi, which here sets η_s and hence the Trouton ratio.
     De_mode_str = lowercase(_gets(mod_sec, "De_mode", "input"))
     De_mode = De_mode_str == "input" ? :input : De_mode_str == "cu_fit" ? :cu_fit :
               error("model.De_mode must be \"input\" or \"cu_fit\". Got: \"$De_mode_str\"")
@@ -294,7 +315,7 @@ function load_styext_context(toml_path :: AbstractString;
                         Wi_conv_str == "shear"  ? :shear  :
                         error("flow.Wi_convention must be \"strain\" or \"shear\". Got: \"$Wi_conv_str\"")
         Wi_convention === :shear && r != 1.0 &&
-            error("flow.Wi_convention = \"shear\" (Wi = λ₀γ̇) is only defined for simple shear r = 1. Got r = $r")
+            error("flow.Wi_convention = \"shear\" (Wi = λ₁,₀γ̇) is only defined for simple shear r = 1. Got r = $r")
         flow = PlanarMixedFlow(r)
     else
         r = NaN
@@ -334,10 +355,9 @@ function load_styext_context(toml_path :: AbstractString;
     Wi_sweep .*= Wi_in_scale
 
     # ── Drag LUT resolution ───────────────────────────────────────────────────
-    # Default 4000 for the steady loader since 2026-10-16 (RP/Aru, KMR grid):
-    # the 400-point table (still the kernel/VELB default in build_drag_assessor)
-    # limits c2d2 accuracy to ~1e-5 near E ≈ 1. Set 400 explicitly to reproduce
-    # pre-2026-10-16 steady outputs bit-for-bit.
+    # Default 4000 points for the steady loader: the 400-point table (the kernel
+    # default in build_drag_assessor, used by the unsteady solver) limits the c2d2
+    # drag accuracy to ~1e-5 near E ≈ 1; 4000 gives ~2e-7.
     drag_lut_n_points = _geti(mod_sec, "drag_lut_n_points", 4000)
     drag_lut_n_points >= 4 || error("model.drag_lut_n_points must be ≥ 4")
 
@@ -356,13 +376,12 @@ function load_styext_context(toml_path :: AbstractString;
     Einf    = bK * NK          # = Q0 * sqrt(NK*Nm)
     Einf_sq = Einf^2           # = Q0_sq * NK * Nm
 
-    # FENE pole: STYEXT convention (differs from VELB for Nm>1).
+    # FENE pole (report Sec. 2.3):
     #   FENE-PME : Q∞² = Q₀²·NK        (whole-chain argument Y/Nm)
     #   FENE-PM/P: Q∞² = Q₀²·NK/Nm     (per-spring argument)
     #   Hookean  : no pole; value stored for bookkeeping only (f ≡ 1).
-    # Params.jl (VELB) uses Q₀²·NK for every model, so the two paths silently
-    # differ for Nm > 1. Reference data (MATLAB STYEXT, Python PMF port) follow
-    # THIS convention.
+    # The liquid-bridge solver's Params.jl uses Q₀²·NK for every model, so the two
+    # paths differ for Nm > 1. The reference data of the test suite follow THIS convention.
     Qinf_sq = fe_model in (:fenepme, :hookean) ? Q0_sq * NK : Q0_sq * NK / Nm
 
     c_star = E0^(-3)
@@ -391,13 +410,14 @@ function load_styext_context(toml_path :: AbstractString;
     )
 
     # ── Equilibrium drag ratio → lambdaZ → etas ───────────────────────────────
-    # Equilibrium: E = 1 (coiled state; matches MATLAB's r=sqrt(Y)/E0=1)
+    # E = 1 is the equilibrium coil.  Γ_eq = ζ₀/ζ_Z = λ₁,₀/λ_Z: the equilibrium longest
+    # relaxation time at this φ relative to its dilute (Zimm) value (report Sec. 2.2).
     Gam_eq, _ = drag_ratio_zimm(1.0, phi, hK_star, NK, drag_model, draining_model;
                                 drag_interp=drag_interp, p_phi=p_phi,
-                                g0_1D=g0_1D, s_form=s_form, q_oes=q_oes)   # λ₀/λ_Z incl. g(s₀) for CU
+                                g0_1D=g0_1D, s_form=s_form, q_oes=q_oes)   # incl. g(s₀) for CU
     Gam_eq > 0 || error("Equilibrium drag ratio must be > 0; got $Gam_eq")
-    # λ₀/λ_Z: model-anchored (1+φ^p)^(1/p) under cu_fit; otherwise the drag-model value
-    # (ζ₀/ζ_Z incl. g(s₀) for CU). Sets ηₛ via λ_Z and hence the Trouton ratio scale.
+    # Legacy cu_fit: λ₁,₀/λ_Z = (1+φ^p)^(1/p) instead of the drag-model value.  Γ_eq sets
+    # η_s through λ_Z = λ₁,₀/Γ_eq and hence the scale of the Trouton ratio.
     De_mode === :cu_fit && (Gam_eq = cu_lambda0_ratio(phi, p_phi))
     lambdaZ = lambda0 / Gam_eq
 

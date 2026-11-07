@@ -1,12 +1,21 @@
 """
-    Params.jl + RuntimeCtx.jl
+    Params.jl
 
-C2D2Params  : portable, serialisable parameter struct (loaded from TOML).
-RuntimeCtx  : runtime-only assembled context (built from C2D2Params).
+Parameter struct and runtime context of the liquid-bridge (filament) solver.
 
-C2D2Params mirrors the TOML file sections.
-RuntimeCtx holds the CoeffsKernel, LUTs, and derived scalar parameters.
-It is never saved to disk — rebuild from C2D2Params if needed.
+    C2D2Params  : portable, serialisable parameter struct (loaded from TOML).
+    RuntimeCtx  : runtime-only assembled context (built from C2D2Params).
+
+The liquid-bridge solver itself is not part of the public C2D2.jl package; this
+file is shipped because it assembles the kernel (Fene, Drag, Spectrum,
+CoeffsRelax) in the same way as the homogeneous-flow solvers and the kernel
+tests exercise it.  Readers of the STYEXT/USYEXT solvers should look at
+front_end/StyextRunContext.jl and front_end/UsyextRunContext.jl instead; the
+TOML keys read here are documented in docs/input_reference.md only where they
+coincide with those loaders.
+
+C2D2Params mirrors the TOML file sections.  RuntimeCtx holds the CoeffsKernel,
+the look-up tables and the derived scalar parameters; it is never saved to disk.
 """
 module Params
 
@@ -41,11 +50,10 @@ TOML section mapping
                   drag_interp (optional, "OESCUI"|"OESI"|"BARECUI"|"BAREI"|"RPI"(="RP")
                                and the archived "RPD"|"RPDW"|"RPDP"|"CU"),
                   p_phi (optional, CU, OESCUI and BARECUI only; default 1.86 for CU, 2.0 for the CUI schemes),
-                  q_oes (optional, OESI and OESCUI only; stretch-delayed dressing exponent, default 0),
-                  g0_1D, s_form (optional, CU only; U_1D relaxation factor), C_phi (optional),
+                  q_oes (optional, OESI and OESCUI only; stretch-delayed shielding exponent, default 0),
+                  g0_1D, s_form (optional, CU only; relaxation-time factor g(s)), C_phi (optional),
                   De_mode (optional, "input"|"cu_fit")
 [flow]          : Oh, De (or De_Z with De_mode = "cu_fit"), De_Z (optional), gravity
-[flow]          : Oh, De
 [grid]          : N_cells, z_max, half_bridge
 [time]          : t_max, dt_init, dt_min, dt_max, rtol, atol
 [output]        : save_interval, output_dir
@@ -103,36 +111,37 @@ struct C2D2Params
     # "sine"                  — one-parameter sine bridge, R_neck from ic_volfrac (Φ) via a quadratic
     ic_type         :: String
 
-    # Drag-interpolation scheme (c2d2 only; 2026-10-15).  :rp = report scheme (default,
-    # bit-identical to earlier code); :cu = Churchill–Usagi blend with exponent p_phi.
+    # Drag-interpolation scheme (c2d2 only; see Drag.jl).  :rp = the original interpolation
+    # (default); the others are the bare-blob / shielded-blob schemes and the archived ones.
     drag_interp     :: Symbol       # :rp | :rpd | :rpdw | :rpdp | :cu | :oescui | :oesi | :barecui | :barei
-    p_phi           :: Float64      # CU / CUI exponent (read only for those schemes; scheme-dependent default)
+    p_phi           :: Float64      # Churchill–Usagi exponent (read only for the CU/CUI schemes; scheme-dependent default)
 
-    # U_1D relaxation factor g(s) and overlap constant (2026-10-17).
-    # g0_1D: Rouse/Zimm floor of g (CU only; 1.0 = off, bit-identical; ≈ 0.44 physically).
+    # Relaxation-time factor g(s) (archived CU scheme only) and overlap constant.
+    # g0_1D: floor of g (CU only; 1.0 = off; the Rouse/Zimm value would be ≈ 0.44).
     # s_form: form of the screening variable s(N_c, N_t) (CU only; :sum).
     # C_phi : overlap constant in c = φ/(C_phi E₀³); divides the stress prefactor
-    #         (all drag schemes; 1.0 = bit-identical).
+    #         (all drag schemes; 1.0 is the historical value).
     g0_1D           :: Float64
     s_form          :: Symbol
     C_phi           :: Float64
 
-    # Model-anchored equilibrium relaxation time (2026-10-17 pm, RP's ansatz).
-    # De_mode = :input  → `De` is used as given (default; bit-identical).
-    #         = :cu_fit → De = De_Z · (1 + φ^p)^(1/p), p = p_phi (λ₀/λ_Z fitted to SAOS).
-    # De_Z: Deborah number on the dilute Zimm time (same scaling as De); NaN if not
-    # supplied. Whenever De_Z is known the polymer stress prefactor is tied to it:
-    # poly_prefactor = −φ U/(C_phi De_Z) (U₁ = U λ₀/λ_Z = U De/De_Z), instead of
-    # using the model's ζ₀/ζ_Z (which carries g(s₀) since 4a9e141).
+    # Legacy choice of the equilibrium longest relaxation time λ₁,₀ (Martin-type ansatz).
+    # De_mode = :input  → `De` is used as given (default).
+    #         = :cu_fit → De = De_Z · (1 + φ^p)^(1/p), p = p_phi, i.e. λ₁,₀/λ_Z from the
+    #                     correlation instead of from the drag model's ζ₀/ζ_Z.
+    # De_Z: Deborah number built on the dilute Zimm time λ_Z (same flow time scale as De);
+    # NaN if not supplied. Whenever De_Z is known the polymer stress prefactor is tied to
+    # it: poly_prefactor = −φ U/(C_phi De_Z) (U₁ = U λ₁,₀/λ_Z = U De/De_Z), instead of
+    # using the model's ζ₀/ζ_Z (which carries g(s₀) for the CU scheme).
     De_mode         :: Symbol
     De_Z            :: Float64
 
-    # Stretch-delayed OES dressing exponent (2026-10-22 pm): ψ = min(φ/E^q, 1) in the OES
-    # schemes (OESI/OESCUI only; 0 = ψ = min(φ, 1), bit-identical; Thin-n-Win runs use 0.25).
+    # Stretch-delayed shielding exponent: ψ = min(φ/E^q, 1) in the shielded-blob schemes
+    # (OESI/OESCUI only; 0 = ψ = min(φ, 1); our capillary-thinning work uses 0.25).
     q_oes           :: Float64
 end
 
-# Backward-compatible positional constructor (2026-10-22 am arity, 31 fields): fills q_oes = 0.
+# Backward-compatible positional constructor (31 fields): fills q_oes = 0.
 function C2D2Params(Nm, NK, hK_star, phi, ic_volfrac,
                     fe_model, drag_model, draining_model, spectrum_model,
                     Oh, De, gravity, N_cells, z_max, half_bridge,
@@ -147,8 +156,8 @@ function C2D2Params(Nm, NK, hK_star, phi, ic_volfrac,
                       drag_interp, p_phi, g0_1D, s_form, C_phi, De_mode, De_Z, DEFAULT_Q_OES)
 end
 
-# Backward-compatible positional constructor (pre-2026-10-15 arity, 24 fields):
-# fills drag_interp = :rp, p_phi = DEFAULT_P_PHI and the 2026-10-17 defaults.
+# Backward-compatible positional constructor (24 fields):
+# fills drag_interp = :rp, p_phi = DEFAULT_P_PHI and the later defaults.
 function C2D2Params(Nm, NK, hK_star, phi, ic_volfrac,
                     fe_model, drag_model, draining_model, spectrum_model,
                     Oh, De, gravity, N_cells, z_max, half_bridge,
@@ -162,7 +171,7 @@ function C2D2Params(Nm, NK, hK_star, phi, ic_volfrac,
                       :rp, DEFAULT_P_PHI, DEFAULT_G0_1D, DEFAULT_S_FORM, 1.0, :input, NaN)
 end
 
-# Backward-compatible positional constructor (2026-10-15 arity, 26 fields):
+# Backward-compatible positional constructor (26 fields):
 # fills g0_1D = 1.0, s_form = :sum, C_phi = 1.0, De_mode = :input, De_Z = NaN.
 function C2D2Params(Nm, NK, hK_star, phi, ic_volfrac,
                     fe_model, drag_model, draining_model, spectrum_model,
@@ -177,7 +186,7 @@ function C2D2Params(Nm, NK, hK_star, phi, ic_volfrac,
                       drag_interp, p_phi, DEFAULT_G0_1D, DEFAULT_S_FORM, 1.0, :input, NaN)
 end
 
-# Backward-compatible positional constructor (2026-10-17 am arity, 29 fields):
+# Backward-compatible positional constructor (29 fields):
 # fills De_mode = :input, De_Z = NaN.
 function C2D2Params(Nm, NK, hK_star, phi, ic_volfrac,
                     fe_model, drag_model, draining_model, spectrum_model,
@@ -222,12 +231,12 @@ function load_params_toml(path::String)::C2D2Params
     # at the scheme's default (1.86 for CU, 2.0 for the CUI schemes; `default_p_phi`).
     mod_sec     = d["model"]
     drag_interp = parse_drag_interp(String(get(mod_sec, "drag_interp", "RP")))
-    # De_mode (2026-10-17 pm): "input" (default) | "cu_fit" (De = De_Z·(1+φ^p)^(1/p)).
+    # De_mode: "input" (default) | "cu_fit" (legacy: De = De_Z·(1+φ^p)^(1/p)).
     De_mode_str = lowercase(String(get(mod_sec, "De_mode", "input")))
     De_mode = De_mode_str == "input"  ? :input  :
               De_mode_str == "cu_fit" ? :cu_fit :
               error("[model] De_mode must be \"input\" or \"cu_fit\". Got: \"$(De_mode_str)\"")
-    # p_phi is needed by the CU / OESCUI / BARECUI drags and by the cu_fit De₀; otherwise stored at
+    # p_phi is needed by the CU / OESCUI / BARECUI drags and by the cu_fit De; otherwise stored at
     # the scheme's default.  (With cu_fit and a CUI drag the one key serves both; default 2.0.)
     needs_p_phi = drag_interp in (:cu, :oescui, :barecui) || De_mode === :cu_fit
     p_phi       = needs_p_phi ? Float64(get(mod_sec, "p_phi", default_p_phi(drag_interp))) : default_p_phi(drag_interp)
@@ -249,7 +258,7 @@ function load_params_toml(path::String)::C2D2Params
         isnan(De_Z) || (isfinite(De_Z) && De_Z > 0) ||
             error("[flow] De_Z must be finite and > 0 when given. Got: $(De_Z)")
     end
-    # g0_1D / s_form (CU only) and C_phi (all schemes); defaults are bit-identical.
+    # g0_1D / s_form (CU only) and C_phi (all schemes); the defaults change nothing.
     g0_1D  = drag_interp === :cu ? Float64(get(mod_sec, "g0_1D", DEFAULT_G0_1D)) : DEFAULT_G0_1D
     s_form = (drag_interp === :cu && g0_1D != 1.0) ?
                  parse_s_form(String(get(mod_sec, "s_form", "sum"))) : DEFAULT_S_FORM
@@ -258,7 +267,7 @@ function load_params_toml(path::String)::C2D2Params
     C_phi = Float64(get(mod_sec, "C_phi", 1.0))
     (isfinite(C_phi) && C_phi > 0) ||
         error("[model] C_phi must be finite and > 0. Got: $(C_phi)")
-    # q_oes (2026-10-22 pm): stretch-delayed OES dressing, OESI/OESCUI only; 0 = bit-identical.
+    # q_oes: stretch-delayed shielding exponent, OESI/OESCUI only; 0 = shielding by overlap alone.
     is_oes = drag_interp in (:oesi, :oescui)
     q_oes  = is_oes ? Float64(get(mod_sec, "q_oes", DEFAULT_Q_OES)) : DEFAULT_Q_OES
     !is_oes && haskey(mod_sec, "q_oes") &&
@@ -320,9 +329,10 @@ Q0_sq         : dimensionless equilibrium spring length squared (= 1 in our scal
 Qinf_sq       : dimensionless FENE pole (= NK for PME/PM, NK/Nm for P variant)
 Na            : number of X auxiliary variables
 zeta0_ratio   : equilibrium drag ratio ζ₀/ζ_Z
-U_zimm        : Zimm pre-factor U = U_∞·α/α_∞ (= 0.325 for non-draining theta coil)
-poly_prefactor: = −φ·U_zimm·(λ₀/λ_Z)/(C_phi·De_v)  (= −χ/3 from FVM note Eq. 42); λ₀/λ_Z = De/De_Z when De_Z is given, else ζ₀/ζ_Z (includes g(s₀) for CU)
-lambda0_ratio : the λ₀/λ_Z actually used
+U_zimm        : Zimm prefactor U = U_∞·α/α_∞ (= 0.325 for a non-draining theta coil)
+poly_prefactor: = −φ·U_zimm·(λ₁,₀/λ_Z)/(C_phi·De)  (= −χ/3 in the filament momentum equation);
+                λ₁,₀/λ_Z = De/De_Z when De_Z is given, else ζ₀/ζ_Z (includes g(s₀) for CU)
+lambda0_ratio : the λ₁,₀/λ_Z actually used (the field name keeps the older symbol λ₀)
 """
 struct RuntimeCtx
     params          :: C2D2Params
@@ -332,9 +342,9 @@ struct RuntimeCtx
     Qinf_sq         :: Float64
     Na              :: Int
     zeta0_ratio     :: Float64
-    U_zimm          :: Float64   # Zimm pre-factor U = U_∞ · α/α_∞  (0.325 for non-draining)
-    poly_prefactor  :: Float64   # = −φ · U_zimm · (λ₀/λ_Z) / (C_phi De)  (χ/3 with correct sign)
-    lambda0_ratio   :: Float64   # λ₀/λ_Z used in the prefactor: De/De_Z if De_Z given, else ζ₀/ζ_Z (model)
+    U_zimm          :: Float64   # Zimm prefactor U = U_∞ · α/α_∞  (0.325 for non-draining)
+    poly_prefactor  :: Float64   # = −φ · U_zimm · (λ₁,₀/λ_Z) / (C_phi De)  (χ/3 with correct sign)
+    lambda0_ratio   :: Float64   # λ₁,₀/λ_Z used in the prefactor: De/De_Z if De_Z given, else ζ₀/ζ_Z (model)
 end
 
 """
@@ -413,28 +423,28 @@ function build_runtime_ctx(p::C2D2Params)::RuntimeCtx
     # α is the draining factor for the full chain; α_∞ is its non-draining limit.
     # For :nondraining the ratio is 1.0 by construction.
     U_INF      = 0.325   # non-draining theta-chain constant
-    alpha_inf  = drag_draining_ratio(p.hK_star, Inf)   # ≈ 5.77
+    alpha_inf  = drag_draining_ratio(p.hK_star, Inf)   # ≈ 5.76
     alpha_coil = p.draining_model === :nondraining ?
                      alpha_inf :
                      drag_draining_ratio(p.hK_star, Float64(p.NK))
     U_zimm = U_INF * alpha_coil / alpha_inf
 
     # ---- Polymer stress prefactor in the filament momentum equation -----------
-    # From FVM note (Ardekani form), the pressure-like variable is:
+    # In the slender-filament (Ardekani-type) formulation the pressure-like variable is
     #   Π = AK(A) + χ · A · f · (M_zz − M_rr)
-    # where χ = 3 φ U_zimm (ζ₀/ζ_Z) / De_v  (FVM note Eq. 42).
+    # with χ = 3 φ U_zimm (ζ₀/ζ_Z) / De.
     #
     # In the code, tau_diff = −3 Σ_p f_p (M_zz_p − M_rr_p), so the polymer
     # contribution to ∂Π/∂z is −(χ/3) · ∂(A · tau_diff)/∂z.
-    # Hence poly_prefactor = −χ/3 = −φ · U_zimm · (ζ₀/ζ_Z) / De_v.
+    # Hence poly_prefactor = −χ/3 = −φ · U_zimm · (ζ₀/ζ_Z) / De.
     #
-    # 2026-10-17 (RP, overlap-crossover note §4): with c = φ/(C_phi E₀³),
-    # χ/3 = φ · U · (λ₀/λ_Z) / (C_phi · De).
-    #   * De_Z known (always for De_mode = :cu_fit; optional otherwise): U₁ = U λ₀/λ_Z
+    # With the overlap constant, c = φ/(C_phi E₀³) and
+    # χ/3 = φ · U · (λ₁,₀/λ_Z) / (C_phi · De).
+    #   * De_Z known (always for De_mode = :cu_fit; optional otherwise): U₁ = U λ₁,₀/λ_Z
     #     = U De/De_Z, so poly_prefactor = −φ U/(C_phi De_Z) — the prefactor is tied
-    #     to the same λ₀ that sets De₀ and is independent of h*_K and g0.
-    #   * De_Z absent: λ₀/λ_Z = ζ₀/ζ_Z from the model (`zeta0`; carries g(s₀) for the
-    #     CU scheme), as before — default runs are bit-identical.
+    #     to the same λ₁,₀ that sets De and is independent of h*_K and g0.
+    #   * De_Z absent: λ₁,₀/λ_Z = ζ₀/ζ_Z from the drag model (`zeta0`; carries g(s₀) for
+    #     the CU scheme).  This is the default.
     #
     # Sign convention: poly_prefactor is NEGATIVE for a polymer that partially
     # resists thinning (which is correct for the viscoelastic cases in Bhat 2010).

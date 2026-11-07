@@ -1,23 +1,29 @@
 """
     UsyextFlows.jl
 
-Flow protocol structs and evaluators for the unsteady extension (USYEXT) solver.
+Flow protocol structs and evaluators for the unsteady extension (USYEXT) solver:
+how the Weissenberg number Wi = λ₁,₀ ε̇ is set at each instant (technical report
+Sec. 4.5.1 for capillary thinning).
 
-Mirrors MATLAB's
-  usyext_flowpack_constant_Wi.m
-  usyext_flowpack_caber.m
+Three protocols are supported (TOML `[flow] kind`):
+  ConstantWiFlow      — "constant": Wi fixed at a user-specified value (start-up of
+                        steady extension).
+  CaberFlow           — "caber": Wi from the one-dimensional viscocapillary stress
+                        balance of a thinning filament (capillary-breakup extensional
+                        rheometry, CaBER, in the viscous limit Oh ≫ 1).
+  CaberInertialFlow   — "caber_inertial": the same balance in the inertiocapillary
+                        limit Oh ≪ 1, with the Ohnesorge number as input.
 
-Two protocols are supported:
-  ConstantWiFlow — Wi fixed at a user-specified value; De given externally.
-  CaberFlow      — Wi computed from the 0-D capillary/stress balance
-                   (Entov–Hinch model for CaBER thinning).
+Time unit: λ₁,₀.  The Deborah number De compares λ₁,₀ with the macroscopic flow
+time: the viscocapillary time t_v = η_s R₀/γ for "caber" and the Rayleigh time
+t_R = √(ρR₀³/γ) for "caber_inertial" (R₀ the initial filament radius, γ the
+surface tension).
 
 Public API
 ----------
-  ConstantWiFlow   — constant-Wi flow context
-  CaberFlow        — CaBER flow context
-  FlowState        — output of eval_flow (plain NamedTuple)
-  eval_flow        — dispatch on flow type; returns a FlowState NamedTuple
+  ConstantWiFlow, CaberFlow, CaberInertialFlow   — flow contexts
+  eval_flow(flow, t, strain, N1_p)               — returns a NamedTuple
+                                                   (Wi, De, R, psi, X, N1_p, K_til)
 """
 module UsyextFlows
 
@@ -28,13 +34,14 @@ export ConstantWiFlow, CaberFlow, CaberInertialFlow, eval_flow
 """
     ConstantWiFlow
 
-Flow context for constant Weissenberg number extension.
+Flow context for extension at constant Weissenberg number Wi = λ₁,₀ ε̇.
 
 Fields
 ------
 Wi_const : constant Wi
-De       : Deborah number (= λ₀ / t_cap)
-alphas   : NTuple{3} of principal flow-rate ratios
+De       : Deborah number λ₁,₀/t_flow; only converts between strain and time
+           in the output (t = strain·De/Wi) for this protocol
+alphas   : NTuple{3} of principal flow-rate ratios (uniaxial: (−½, −½, 1))
 i_ext    : index of the extensional axis (argmax alphas)
 i_comp   : index of the primary compressive axis (argmin alphas)
 """
@@ -58,32 +65,34 @@ end
 """
     CaberFlow
 
-Flow context for CaBER capillary-thinning extension.
+Flow context for capillary thinning (CaBER) in the viscocapillary limit Oh ≫ 1.
 
-The 0-D viscocapillary stress balance (TnW paper v4 §`sec:mfsbe`, Eq.
-`e:Wi-visc`) gives Wi from the current filament radius R = exp(-ε/2) and the
-first normal stress difference N1_p, in the paper's notation (`U_1`, not the
-old `K̃`):
+The one-dimensional stress balance of a thinning filament (report Sec. 4.5.1)
+gives Wi from the current filament radius R = exp(−ε/2) (relative to R₀) and
+the polymer first normal stress difference N1_p = (τ_zz − τ_rr)/(c k_BT):
 
-    R   = exp(-ε/2)
-    U_R = U_1 / De                         # capillary-normalized modulus ratio (= U_1/De_{0v})
+    R   = exp(−ε/2)
+    U_R = U₁ / De                          # polymer modulus over capillary pressure, c*k_BT R₀/γ
     ψ,X = _x_switch(Xv, Xe, U_R, φ, N1_p, R)
-    Wi  = ⅓ [ (2X-1)/R · De  +  φ U_1 N1_p ]
+    Wi  = ⅓ [ (2X−1)/R · De  +  φ U₁ N1_p ]
 
-Here `U_1 = λ₁ kT /(η_s R_eo³)` is the viscocapillary polymer prefactor (paper
-Eq. for `U_1`; → 0.325 as N_K→∞). The old code group `K̃ = φ U_1` is now only a
-derived temporary (returned in the diagnostic NamedTuple for the CaBER CSV).
+Here `U_1` = U₁ = λ₁,₀ k_BT/(η_s E₀³) is the dimensionless group that compares the
+polymer contribution to the viscosity with the solvent viscosity (→ 0.325·λ₁,₀/λ_Z
+for a non-draining coil).  The product φ U₁ is written to the CaBER diagnostic
+CSV as `K_til`.  X is the end-plate (geometry) factor of the thinning filament,
+carried from its Newtonian value Xv to the elastic value Xe as the polymer stress
+takes over the capillary pressure (`_x_switch`).
 
 Fields
 ------
-De       : Deborah number  (= λ₀ / t_cap = De_{0v})
+De       : Deborah number λ₁,₀/t_v, t_v = η_s R₀/γ the viscocapillary time
 alphas   : NTuple{3} of principal flow-rate ratios
 i_ext    : index of extensional axis (argmax alphas)
 i_comp   : index of primary compressive axis
-Xv       : viscous-limit X = 0.7127  (constant; see Entov-Hinch)
+Xv       : viscous-limit X = 0.7127  (constant, Entov–Hinch / Papageorgiou)
 Xe       : elastic-limit X = 1.5     (constant)
-phi      : concentration φ = c/c*
-U_1      : viscocapillary polymer prefactor  λ₁ kT /(η_s R_eo³)
+phi      : overlap ratio φ = c/c* as seen by the stress balance (φ/C_φ)
+U_1      : the polymer prefactor U₁ defined above
 """
 struct CaberFlow
     De     :: Float64
@@ -110,51 +119,47 @@ end
 """
     CaberInertialFlow
 
-Flow context for CaBER capillary thinning in the **inertio-capillary** regime
-(Oh ≪ 1).  Companion to `CaberFlow` (the viscocapillary Oh ≫ 1 limit); the two
-closed-form limits are implemented as separate structs so the viscous path is
-left untouched.
+Flow context for capillary thinning (CaBER) in the **inertiocapillary** limit
+Oh ≪ 1 (report Sec. 4.5.1, "Inertiocapillary limit").  Companion to `CaberFlow`
+(the viscocapillary limit Oh ≫ 1); the two closed-form limits are separate
+structs so that the viscous path is left untouched.
 
-The 0-D inertio-capillary stress balance (TnW paper v4 §`sec:mfsbe`, Eq.
-`e:Wi-inert`) gives Wi from the current filament radius R = exp(-ε/2) and the
-first normal stress difference N1_p.  The polymer prefactor is formed PER
-EVALUATION from the physical inputs (2026-06-12 Oh-primary pivot):
+The stress balance gives Wi from the current filament radius R = exp(−ε/2) and
+the polymer first normal stress difference N1_p.  The polymer prefactor is
+formed at every evaluation from the physical inputs:
 
-    R       = exp(-ε/2)
-    U_R_eff = Oh · U_1 / De_R               # = U_1/De_0v — the device locus
+    R       = exp(−ε/2)
+    U_R_eff = Oh · U₁ / De_R                # = U₁/De_v, the polymer modulus over the capillary pressure
     ψ,X     = _x_switch(XR, Xe, U_R_eff, φ, N1_p, R)
-    arg     = (2X-1)/R  +  φ U_R_eff N1_p   # capillary minus polymer normal stress
+    arg     = (2X−1)/R  +  φ U_R_eff N1_p   # capillary minus polymer normal stress
     Wi      = (2√2 · De_R / R) · √(max(arg, 0))
 
-`U_R` is NOT an independent constant: the relaxation time is carried by the
-solvent (`λ₁ = U_1 η_s R_eo³/kT`), so `U_R = R₀c*kT/γ = U_1/De_0v =
-Oh·U_1/De_R`. A De_R sweep at fixed Oh therefore has `U_R_eff ∝ 1/De_R` —
-the prefactor varies across the sweep BY DESIGN (it traces the device locus
-of one real fluid; the fluid group `C = U_1·Oh/De_R^{1/3} = ℓ_λ/ℓ_R` is
-R₀-independent).  `Oh = 0` is the degenerate no-arrest limit (the polymer
-term vanishes → Keller–Miksis pinch-off); inertio-ELASTO-capillary thinning
-is the finite-Oh regime, with arrest requiring roughly `Oh ≳ 1/N_K` (the
-balance needs `Ñ₁ₚ* ~ 1/Oh`, capped at `~N_K` by finite extensibility).
-The diagnostic group `K̃ = φ U_R_eff` is returned in the NamedTuple for the
-CaBER CSV.
+The Ohnesorge number Oh = η_s/√(ρ R₀ γ) is the input; U_R is derived from it.
+U_R is not an independent constant: the relaxation time is carried by the
+solvent (λ₁,₀ = U₁ η_s E₀³/k_BT), so U_R = c* k_BT R₀/γ = U₁/De_v = Oh·U₁/De_R
+(De_v = De_R/Oh because t_v = Oh·t_R).  A De_R sweep at fixed Oh therefore has
+U_R_eff ∝ 1/De_R by design: it traces the locus of one real fluid on one
+device as R₀ changes.  Oh = 0 is the degenerate limit without polymer arrest
+(the polymer term vanishes and the filament pinches off as a Newtonian
+inviscid thread); arrest needs roughly Oh ≳ 1/N_K.  The diagnostic group
+K̃ = φ U_R_eff is returned in the NamedTuple for the CaBER CSV.
 
-Pure-solvent check (N1_p → 0): `Wi = 2√2 De_R √(2X_R-1) R^{-3/2}`, i.e.
-`Wi ∝ R^{-1/β}` with β = 2/3, and the pre-elastic prefactor
-`H_R = √(8(2X_R-1))` (Wi₀ = H_R De_R at R = 1).  With Gaillard's measured
-self-similar prefactor A ≈ 0.47, `2X_R-1 = 2A³/9 ≈ 0.0231` ⟹ X_R ≈ 0.5115,
-H_R ≈ 0.43.
+Pure-solvent check (N1_p → 0): Wi = 2√2 De_R √(2X_R−1) R^(−3/2), i.e.
+Wi ∝ R^(−1/β) with β = 2/3, and the pre-elastic prefactor H_R = √(8(2X_R−1))
+(Wi₀ = H_R De_R at R = 1).  With the self-similar prefactor A ≈ 0.47 measured by
+Gaillard et al., 2X_R−1 = 2A³/9 ≈ 0.0231, so X_R ≈ 0.5115 and H_R ≈ 0.43.
 
 Fields
 ------
-De_R     : Rayleigh-time Deborah number (= λ₀ / t_R,  t_R = √(ρ R₀³/γ))
+De_R     : Rayleigh-time Deborah number λ₁,₀/t_R, t_R = √(ρ R₀³/γ)
 alphas   : NTuple{3} of principal flow-rate ratios
 i_ext    : index of extensional axis (argmax alphas)
 i_comp   : index of primary compressive axis
-XR       : inertio-capillary Newtonian end-plate factor X_R (default 0.5115)
+XR       : inertiocapillary Newtonian end-plate factor X_R (default 0.5115)
 Xe       : elastic-limit X = 1.5
-phi      : concentration φ = c/c*
-Oh       : Ohnesorge number (primary inertial input; 0 ⇒ no polymer arrest)
-U_1      : viscocapillary polymer prefactor λ₁kT/(η_s R_eo³) (≈0.325 as N_K→∞)
+phi      : overlap ratio φ = c/c* as seen by the stress balance (φ/C_φ)
+Oh       : Ohnesorge number (the inertial input; 0 ⇒ no polymer arrest)
+U_1      : the polymer prefactor U₁ = λ₁,₀ k_BT/(η_s E₀³) (see `CaberFlow`)
 """
 struct CaberInertialFlow
     De_R   :: Float64
@@ -181,15 +186,15 @@ end
 """
     _x_switch(X0, Xe, U_R, phi, N1_p, R) -> (psi, X)
 
-Regime-neutral end-plate-factor switch shared by both CaBER limits. `X0` is the
-low-stress (Newtonian) end-plate factor — `Xv` in the viscocapillary regime,
-`XR` in the inertio-capillary regime — and `Xe` the elastic limit (3/2).
+End-plate-factor switch shared by both CaBER limits (report Sec. 4.5.1, the
+linear switching law). `X0` is the low-stress (Newtonian) end-plate factor, `Xv`
+in the viscocapillary regime and `XR` in the inertiocapillary regime, and `Xe`
+the elastic limit (3/2).
 
-The switch variable ψ is the capillary-normalized polymer/capillary stress ratio
-`ψ = clamp(−φ U_R N1_p R, 0, 2)`, where `U_R` is the capillary-normalized modulus
-ratio (`U_R = U_1/De` in the viscous regime, the supplied `U_R` in the inertial
-regime). X is carried linearly from X0 to Xe as ψ runs 0→2. N1_p < 0 in
-extension, so ψ ≥ 0.
+The switch variable ψ is the polymer normal stress over the capillary pressure,
+ψ = clamp(−φ U_R N1_p R, 0, 2), where U_R = U₁/De in the viscous regime and
+Oh·U₁/De_R in the inertial regime. X is carried linearly from X0 to Xe as ψ runs
+from 0 to 2 and stays at Xe beyond. N1_p < 0 in extension, so ψ ≥ 0.
 """
 @inline function _x_switch(X0::Float64, Xe::Float64, U_R::Float64,
                            phi::Float64, N1_p::Float64, R::Float64)
@@ -203,10 +208,11 @@ end
 """
     eval_flow(flow, t, strain, N1_p) -> NamedTuple
 
-Evaluate the flow state at the current time, strain, and polymer N1_p.
+Evaluate the flow state at the current time, Hencky strain and polymer N1_p.
 
-Returns a NamedTuple with at least fields: Wi, De, R, psi, X, N1_p, K_til.
-(`K_til = φ U` is a derived diagnostic temporary; the structs store U_1 / U_R.)
+Returns a NamedTuple with the fields Wi, De, R, psi, X, N1_p, K_til (R, psi, X
+and K_til are NaN for `ConstantWiFlow`; K_til = φ U₁ or φ U_R_eff is the
+polymer-stress prefactor of the balance, written to the CaBER diagnostic CSV).
 """
 function eval_flow(flow::ConstantWiFlow, t::Float64, strain::Float64, N1_p::Float64)
     return (
@@ -223,8 +229,8 @@ end
 function eval_flow(flow::CaberFlow, t::Float64, strain::Float64, N1_p::Float64)
     R   = exp(-0.5 * strain)
 
-    # Capillary-normalized modulus ratio for the (regime-neutral) X switch.
-    U_R = flow.U_1 / flow.De                       # = U_1/De_{0v}
+    # Polymer modulus over capillary pressure, for the X switch.
+    U_R = flow.U_1 / flow.De                       # = U₁/De_v
     psi, X = _x_switch(flow.Xv, flow.Xe, U_R, flow.phi, N1_p, R)
 
     K_til = flow.phi * flow.U_1                     # derived temporary (diagnostic)
@@ -244,7 +250,7 @@ end
 function eval_flow(flow::CaberInertialFlow, t::Float64, strain::Float64, N1_p::Float64)
     R = exp(-0.5 * strain)
 
-    # Device-locus prefactor: U_R is not independent — U_R = Oh·U_1/De_R.
+    # U_R is not an independent input: U_R = Oh·U₁/De_R (see the struct docstring).
     # Formed per evaluation; ∝ 1/De_R across a fixed-Oh sweep (by design).
     U_R_eff = flow.Oh * flow.U_1 / flow.De_R
 

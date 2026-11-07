@@ -1,9 +1,10 @@
 """
     StyextManifold.jl
 
-Pseudo-arclength continuation (PAC) manifold builder for steady extension.
-
-Mirrors MATLAB's styext_pac_mu_manifold.m.
+Pseudo-arclength continuation (PAC) manifold builder for steady homogeneous
+flows: traces the curve of steady states (stress versus Weissenberg number)
+from equilibrium up to the stretch cap, placing points adaptively (technical
+report Secs. 3.1 and 3.3).
 
 Algorithm:
   1. Seed at equilibrium: (X=Q₀², Y=E₀², μ=0)
@@ -16,12 +17,13 @@ Algorithm:
 
 Termination conditions:
   - Y ≥ Y_stop (= max_frac_stretch_sq · E∞²)
-  - max(X) ≥ X_stop (= max_frac_stretch_sq · Q∞² for FENE-PM/P; 2026-10-16)
+  - max(X) ≥ X_stop (= max_frac_stretch_sq · Q∞² for FENE-PM/P)
   - Wi ≥ Wi_max
   - FY_rel > tol_FY_rel_hard
   - ds < ds_min with no acceptance
 
-Output: a Vector{StyextPoint} and a CSV summary file.
+Output: a Vector{StyextPoint}, written to summary.csv by `write_summary_csv`
+(columns documented in docs/output_reference.md).
 
 Public API
 ----------
@@ -47,7 +49,8 @@ export ManifoldOpts, StyextPoint, build_manifold, write_summary_csv
 """
     ManifoldOpts
 
-Step-size and termination controls for the PAC manifold builder.
+Step-size and termination controls for the PAC manifold builder, read from the
+TOML `[continuation]` and `[limits]` sections (see docs/input_reference.md).
 """
 Base.@kwdef struct ManifoldOpts
     ds0              :: Float64 = 1e-3
@@ -67,7 +70,10 @@ end
 """
     StyextPoint
 
-One accepted point on the steady-extension manifold.
+One accepted steady state on the manifold (one row of summary.csv): the closure
+variables X and Y = E², the continuation coordinate μ, the observables `obs`
+(Wi, stresses, extensional viscosities, Trouton ratios; `StateObs.C2D2Obs`),
+the Wi pole at that state, and the solver diagnostics of the step.
 """
 struct StyextPoint
     idx          :: Int
@@ -223,9 +229,18 @@ end
     build_manifold(ctx, solver_opts, man_opts; return_reason=false)
         -> Vector{StyextPoint}  |  (Vector{StyextPoint}, reason::String)
 
-Run the PAC manifold builder and return all accepted points. With
-`return_reason = true` also return the termination reason
-("Y_stop" | "Wi_max" | "FY_rel_hard" | "ds_min" | "max_steps").
+Trace the steady-state curve of the flow in `ctx` (from `load_styext_context`)
+from equilibrium up to the stretch cap, and return all accepted points in order
+of increasing stretch.  `solver_opts` and `man_opts` are the Newton and
+continuation controls returned by the same loader.  With `return_reason = true`
+also return the termination reason ("Y_stop" | "X_stop" | "Wi_max" |
+"FY_rel_hard" | "ds_min" | "max_steps").  Report Secs. 3.1 and 3.3.
+
+Example
+-------
+    params, ctx, solver_opts, man_opts = load_styext_context("styext_example.toml")
+    traj = build_manifold(ctx, solver_opts, man_opts)
+    write_summary_csv("summary.csv", traj)
 """
 function build_manifold(ctx         :: StyextMPCtx,
                         solver_opts :: SolverOpts,
@@ -363,9 +378,17 @@ end
 """
     write_summary_csv(path, traj)
 
-Write manifold trajectory to CSV (standard STYEXT summary format).
+Write the steady-state curve to CSV (one row per accepted point).
 
 Columns: idx,E2,Wi,etaE1,etaE2,Tr1,Tr2,tau_xx,tau_yy,tau_zz,Wi_pole,newton_iters,ds,FY_rel,status
+  E2  chain stretch E² relative to the equilibrium coil (E² = 1 at rest);  Wi = λ₁,₀ ε̇;
+  etaE1, etaE2  polymer extensional viscosities −(τ_ext − τ_comp)/Wi in units of
+  c k_BT λ₁,₀ (equal for uniaxial flow);  Tr1, Tr2  Trouton ratios (polymer extensional
+  viscosity over 3 η_s);  tau_xx, tau_yy, tau_zz  polymer stress τ/(c k_BT),
+  compressive-positive;  Wi_pole  the Wi at which the steady state at this stretch
+  ceases to exist;  newton_iters, ds, FY_rel, status  solver diagnostics of the step
+  ("eq" equilibrium, "PAC-cnv" / "FY-cnv" converged, "FY-dnc" not converged).
+Full description: docs/output_reference.md.
 """
 function write_summary_csv(path::AbstractString, traj::Vector{StyextPoint})
     open(path, "w") do io

@@ -1,10 +1,17 @@
 """
     CoeffsRelax.jl
 
-Compute θ_p and σ_p — the modal evolution coefficients for the C2D2 model.
+Compute θ_p and σ_p, the coefficients of the modal evolution equations of the
+C2D2 model (technical report Sec. 2.3, dimensionless equations):
 
-    θ_p(Z) = f_p(Z) / (Λ(Z) λ̂_p(Z))
-    σ_p(Z) = 1      / (3 Λ(Z) λ̂_p(Z))
+    θ_p(Z) = f_p(Z) / (Λ(Z) λ̂_p(Z))     relaxation rate of mode p, in units of 1/λ₁,₀
+    σ_p(Z) = 1      / (3 Λ(Z) λ̂_p(Z))     Brownian source term of mode p
+
+where Z = (X, Y) collects the closure variables (Y = E² the chain's mean-square
+end-to-end distance, X the spring-law auxiliaries), f_p is the finite-extensibility
+factor (Fene.jl), λ̂_p = λ_p/λ₁ the relative spectrum and Λ = λ₁/λ₁,₀ = ζ/ζ₀ the
+drag dilation (Spectrum.jl, Drag.jl).  Each modal conformation tensor then obeys
+dM_p/dt = κ·M_p + M_p·κᵀ − θ_p M_p + σ_p I (time in units of λ₁,₀).
 
 Performance design
 ------------------

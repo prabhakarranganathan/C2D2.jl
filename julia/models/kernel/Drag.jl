@@ -1,12 +1,30 @@
 """
     Drag.jl
 
-Chain friction kernel for the C2D2 model.
+Chain friction kernel for the C2D2 (conformation- and concentration-dependent
+drag) model.  Physics: technical report Sec. 2.1 "Chain friction"
+(DOI 10.5281/zenodo.18012677).
 
 Implements:
-  - Kirkwood-Riseman draining function α(h*_k, N)
-  - Full C2D2 drag ratio ζ/ζ_Z (constant / C1D2 / C2D2 models)
-  - A piecewise-PCHIP LUT assessor for fast evaluation during time integration
+  - the Kirkwood–Riseman draining function α(h*_K, N) of an ideal random-walk
+    blob of N Kuhn segments (report Sec. 2.1.2);
+  - the chain drag ratio ζ/ζ_Z as a function of the chain stretch E and the
+    overlap ratio φ = c/c*, for the three drag models `:constant`, `:c1d2`
+    (conformation-dependent only) and `:c2d2` (report Secs. 2.1.4–2.1.8);
+  - a piecewise monotone-cubic (PCHIP) look-up table in E, built once per run,
+    so the solvers never evaluate the closed forms inside a time step.
+
+Notation (same as the report)
+-----------------------------
+  E       chain stretch, √(E²)/E₀, with E = 1 for the equilibrium coil
+  E₀      equilibrium coil size (the length unit of the kernel)
+  φ       overlap ratio c/c* = C_φ c E₀³
+  h*_K    hydrodynamic-interaction (HI) parameter of a Kuhn segment
+  N_K     number of Kuhn segments in the chain
+  ζ_Z     Zimm drag of the equilibrium coil in the dilute limit
+  ζ₀      drag of the equilibrium coil at the given φ  (ζ₀ = ζ_Z as φ → 0)
+  α_∞     non-draining limit of α, 3π/1.6366 ≈ 5.76
+  Λ       relaxation-time dilation λ₁/λ₁,₀ = ζ/ζ₀  (see Spectrum.jl)
 
 Public API
 ----------
@@ -15,46 +33,48 @@ Public API
                   drag_model, draining_model;
                   drag_interp=:rp, p_phi=default_p_phi(drag_interp))
                                                 -> (zeta_ratio, diagnostics)
-  build_drag_assessor(params)                   -> DragAssessor
-  parse_drag_interp(str)                        -> :rp | :rpd | :rpdw | :rpdp | :cu
-                                                   | :oescui | :oesi | :barecui | :barei
-                                                   ("RPI" is an alias of "RP")
-  oesi_dilute_weak_E(phi, E_max)                -> v2-family dilute/weak boundary E_b(φ) (NaN if none)
-  oesi_shape_D(A)                               -> monotone shape factor D(A) of the v2 family
-  DEFAULT_P_PHI                                 -> 1.86 (CU);  DEFAULT_P_PHI_OESCUI -> 2.0 (CUI schemes)
-  default_p_phi(drag_interp)                    -> the scheme's default p_phi
-  DEFAULT_Q_OES                                 -> 0.0 (stretch-delayed OES dressing exponent; OESI/OESCUI only)
-  oesi_dressing_E(phi, q_oes, E_max)            -> E_q = φ^(1/q): where ψ = min(φ/E^q, 1) leaves 1 (NaN if none)
-
-Drag-interpolation schemes (`drag_interp`, only used by drag_model = :c2d2):
-  :rp  — the report scheme (RP): tension-blob G1/G2 drag for E > φ, correlation-blob
-         drag ζ_c N_c for E ≤ φ, with a kink at the switch.  Default; bit-identical
-         to the pre-2026-10-15 code.
-  :cu  — Churchill–Usagi blend ζ = (ζ_w^p + ζ_s^p)^(1/p), p = p_phi, of the weakly
-         screened (Batchelor + Mackaplow–Shaqfeh) drag ζ_w and the strongly screened
-         drag ζ_s, with a quadratic-at-small-stretch Batchelor J and a screening length
-         that crosses over smoothly to the correlation length.  Smooth in φ and E;
-         Λ = 1 at rest for every φ.  See docs/logs/aru-to-ko/2026-10-15_cu-drag-interp-scheme.md.
-  :rpd, :rpdw, :rpdp — RP with an overlap-dressed core-blob shielding factor
-         α → α + (α_∞ − α)ψ, ψ = φE | φ/E | φ (2026-10-20).
-  The v2 family (Aru's OES note Secs. 3.1–3.7; 2026-10-21/22), one code path
-  `_drag_c2d2_v2` with two switches, overlap-enhanced shielding (oes) and the capped
-  Churchill–Usagi blend (cui):
-  :oescui — oes on, cui on.  RP's adopted form.  Tension-blob drag with the overlap dressing
-         ψ = min(φ/E^q, 1), q = q_oes (default 0, i.e. RPDP's ψ = min(φ,1); the Thin-n-Win
-         runs set q_oes = 0.25, 2026-10-22 pm), the regularised Mackaplow–Shaqfeh screening length
-         χ/ξ_t = sqrt((1 + ln(1/φ_t))/φ_t), A = min(E², χ/ξ_t) and the monotone shape
-         factor D(A) = sqrt(A) (A ≤ 4), 2 + ln(A/4) (A > 4); blended with the non-draining
-         correlation-blob drag (α_∞/α_Z)·min(φ, √N_K) by (ζ_w^p + ζ_s^p)^(1/p), p = p_phi
-         (default 2.0), capped at the Rouse drag (α_∞/α_Z)√N_K.
-  :oesi — oes on, cui off: weak drag for E > φ, strong for E ≤ φ (continuous; slope
-         corners at φ = 1, at the dilute/weak boundary φE³ = 1 + ln(E/φ) and at E = φ).
-  :barecui — oes off, cui on: bare α(h*_K, N_K/N_t) and α(h*_K, N_K/N_c), cap
-         (α(h*_K, 1)/α_Z)√N_K.
-  :barei — oes off, cui off: bare C2D2 with the 21-Oct boundary and D(A); the original blob
-         model at rest.
+  build_drag_assessor(phi, hK_star, NK, drag_model, draining_model; ...)
+                                                -> DragAssessor
   eval_drag(assessor, E)                        -> zeta_ratio
   eval_drag_deriv(assessor, E)                  -> d(zeta_ratio)/dE
+  parse_drag_interp(str)                        -> scheme symbol (see below)
+  default_p_phi(drag_interp)                    -> the scheme's default p_phi
+  DEFAULT_P_PHI                                 -> 1.86 (CU);  DEFAULT_P_PHI_OESCUI -> 2.0 (CUI schemes)
+  DEFAULT_Q_OES                                 -> 0.0 (stretch-delayed shielding exponent; OESI/OESCUI only)
+  oesi_dilute_weak_E(phi, E_max)                -> dilute/weakly-screened boundary E_b(φ) (NaN if none)
+  oesi_shape_D(A)                               -> shape factor D(A) of the blob schemes
+  oesi_dressing_E(phi, q_oes, E_max)            -> E_q = φ^(1/q), where ψ = min(φ/E^q, 1) leaves 1 (NaN if none)
+
+Drag-interpolation schemes (`[model] drag_interp`; consulted only for drag_model = :c2d2)
+------------------------------------------------------------------------------------------
+Each scheme joins the drag of the weakly screened limit (tension blobs, ζ_w) to
+that of the strongly screened limit (correlation blobs, ζ_s).  Two switches
+distinguish the current schemes (report Secs. 2.1.5–2.1.7):
+
+  * OES, overlap-enhanced shielding: whether overlapping chains make the blobs
+    non-draining ("shielded-blob model") or the blobs keep their bare
+    Kirkwood–Riseman draining ("bare-blob model");
+  * CU, the Churchill–Usagi blend ζ = (ζ_w^p + ζ_s^p)^(1/p), p = p_phi, capped at
+    the Rouse drag, instead of a hard switch at E = φ.
+
+  TOML name   symbol     model            join                           report
+  "RP"/"RPI"  :rp        original         switch at E = φ (slope kink)   Sec. 2.1.8   (default)
+  "BAREI"     :barei     bare-blob        switch at E = φ                Sec. 2.1.6
+  "BARECUI"   :barecui   bare-blob        Churchill–Usagi, exponent p_phi Sec. 2.1.6
+  "OESI"      :oesi      shielded-blob    switch at E = φ                Sec. 2.1.6
+  "OESCUI"    :oescui    shielded-blob    Churchill–Usagi, exponent p_phi Sec. 2.1.6   (used in our current work)
+
+  The shielded-blob schemes also accept q_oes: the shielding factor is
+  ψ = min(φ/E^q, 1), so q > 0 delays the onset of shielding as the chain
+  stretches (q = 0: shielding set by the overlap alone).
+
+  Archived schemes, kept so that earlier runs can be reproduced and not
+  recommended for new work: "CU" (the first Churchill–Usagi blend of the two
+  limits, p_phi = 1.86, with the optional relaxation-time factor g(s)) and
+  "RPD"/"RPDW"/"RPDP" (the original scheme with a shielding factor
+  α → α + (α_∞ − α)ψ, ψ = φE, φ/E or φ).
+
+All defaults reproduce the original scheme exactly.
 """
 module Drag
 
@@ -69,7 +89,8 @@ export drag_draining_ratio, drag_ratio_zimm, DragAssessor,
 
 # ── Drag-interpolation scheme selector ───────────────────────────────────────
 
-"""Default Churchill–Usagi exponent p_φ (fitted at rest to Martin's correlation)."""
+"""Default Churchill–Usagi exponent p_φ of the archived "CU" scheme (fitted at rest to
+the Martin correlation for λ₁,₀/λ_Z; report Sec. 2.1.3)."""
 const DEFAULT_P_PHI = 1.86
 
 """
@@ -82,7 +103,7 @@ Errors on anything else.
 function parse_drag_interp(str::AbstractString)::Symbol
     s = lowercase(strip(String(str)))
     s == "rp" && return :rp
-    s == "rpi" && return :rp                       # alias (2026-10-22): the original scheme
+    s == "rpi" && return :rp                       # alias: the original interpolation (report Sec. 2.1.8)
     s == "cu" && return :cu
     s == "rpd" && return :rpd
     s == "rpdw" && return :rpdw
@@ -95,29 +116,29 @@ function parse_drag_interp(str::AbstractString)::Symbol
           "\"RPD\", \"RPDW\", \"RPDP\", \"CU\"), case-insensitive. Got: \"$(str)\"")
 end
 
-# ── U_1D relaxation factor g(s) (CU scheme only; 2026-10-17, Aru→Ko handover) ──
+# ── Relaxation-time factor g(s) (archived "CU" scheme only; experimental) ─────
 #
-# The universal ratio U_1D = λ₁D/E₀² changes from its Zimm value to its Rouse
-# value (U_1D,R/U_1D,Z ≈ 0.44, Kröger et al. 2000) as hydrodynamic interactions
-# are screened, by overlap (correlation blobs) or by stretching (tension blobs).
-# RP's formulation (overlap-crossover note §4):
+# The universal ratio U_1D = λ₁ D/E₀² (D the chain diffusivity) changes from its
+# Zimm value to its Rouse value (ratio ≈ 0.44, Kröger et al. 2000) as hydrodynamic
+# interactions are screened, by overlap (correlation blobs) or by stretching
+# (tension blobs).  The CU scheme can multiply the drag by an empirical factor
+# g(s) that mimics this:
 #
-#     N_t = clamp(E², 1, N_K)                                   (code units, E₀ = 1)
-#     N_c = overlap (correlation-blob) count — two forms (2026-10-17 pm, RP's settled ansatz):
-#           :sum      → N_c′ = min((1 + φ^p)^(2/p), N_K)   CU-smooth continuation (DEFAULT);
-#                       the hard corner at φ = 1 gave a bump / second minimum in Wi(φ)
-#           :sum_hard → N_c  = clamp(φ², 1, N_K)            the 4a9e141 form, kept for reproducibility
+#     N_t = clamp(E², 1, N_K)                                   (E₀ = 1)
+#     N_c = overlap (correlation-blob) count, two forms:
+#           :sum      → N_c′ = min((1 + φ^p)^(2/p), N_K)   smooth continuation (default)
+#           :sum_hard → N_c  = clamp(φ², 1, N_K)            hard corner at φ = 1
 #     s   = N_c + N_t − 2  (both forms),  s₀ = N_c − 1 (at rest)
 #     g(s) = g0 + (1 − g0) / (1 + s^p)^(1/p),   p = p_phi,   g(0) = 1, g → g0 for s ≫ 1
-#     (g0 is an empirical O(1) knob in this ansatz — RP's working value 0.5 — not a claim
-#      about U_1D,R/U_1D,Z.)  The DRAG keeps its own blob counts; only s/s₀ use N_c′.
 #
-# The CU branch returns ζ_eff = g(s)·ζ as `zeta_ratio`, so Λ = λ(E)/λ₀ =
-# [g(s)/g(s₀)]·ζ(E)/ζ₀ and λ₀/λ_Z = g(s₀)·ζ₀/ζ_Z follow automatically
-# (s₀ = s(N_c, 1) is the at-rest value). The blob diagnostics use the bare ζ.
-# g0_1D = 1 switches the factor off exactly (ζ_eff = 1.0·ζ, bit-identical).
+# g0 is an empirical O(1) knob (0.5 was used in exploratory runs), not a claim
+# about the Rouse/Zimm ratio.  The drag keeps its own blob counts; only s uses N_c′.
+# The CU branch returns ζ_eff = g(s)·ζ as `zeta_ratio`, so Λ = λ₁/λ₁,₀ =
+# [g(s)/g(s₀)]·ζ(E)/ζ₀ and λ₁,₀/λ_Z = g(s₀)·ζ₀/ζ_Z follow automatically.  The blob
+# diagnostics use the bare ζ.  g0_1D = 1 (the default) switches the factor off
+# exactly.  Not used by the bare-blob or shielded-blob schemes.
 
-"""Default U_1D floor g0 (1.0 = factor off; physically ≈ 0.44)."""
+"""Default floor g0 of the relaxation-time factor g(s) (1.0 = factor off; the Rouse/Zimm value would be ≈ 0.44)."""
 const DEFAULT_G0_1D = 1.0
 
 """Default form of the screening variable s(N_c, N_t): smooth N_c′ (see `_Nc_of`)."""
@@ -128,7 +149,7 @@ const DEFAULT_S_FORM = :sum
 
 Map the TOML `[model] s_form` string (case-insensitive) to a supported form:
 `"sum"` (default; smooth N_c′ = min((1+φ^p)^(2/p), N_K), s = N_c′ + N_t − 2) or
-`"sum_hard"` (N_c = clamp(φ², 1, N_K); the 2026-10-17 am / commit 4a9e141 form).
+`"sum_hard"` (N_c = clamp(φ², 1, N_K), with a corner at φ = 1).  CU scheme only.
 """
 function parse_s_form(str::AbstractString)::Symbol
     s = lowercase(strip(String(str)))
@@ -153,19 +174,25 @@ _Nc_of(::Val{F}, phi, p, NK) where {F} = error("_Nc_of: unknown s_form :$(F)")
 _s_of(::Val{F}, Nc, Nt) where {F} = error("_s_of: unknown s_form :$(F)")
 
 """
-    cu_lambda0_ratio(phi, p) -> λ₀/λ_Z
+    cu_lambda0_ratio(phi, p) -> λ₁,₀/λ_Z
 
-Model-anchored equilibrium relaxation-time ratio of RP's ansatz (2026-10-17):
-λ₀/λ_Z = (1 + φ^p)^(1/p), p = p_phi fitted per system to SAOS λ₀/λ_Z. Used by
-`De_mode = "cu_fit"`: De₀ = De_Z · (1 + φ^p)^(1/p). Independent of h*_K and g0.
+Martin-type correlation for the equilibrium longest relaxation time at overlap
+ratio φ, relative to its dilute (Zimm) value: λ₁,₀/λ_Z = (1 + φ^p)^(1/p), with
+p = p_phi fitted to small-amplitude oscillatory shear data (report Sec. 2.1.3).
+
+Used only by the legacy option `[model] De_mode = "cu_fit"`, which replaces the
+drag model's own ζ₀/ζ_Z by this expression wherever λ₁,₀/λ_Z enters: the
+Deborah number De = De_Z·(1 + φ^p)^(1/p), the capillary-thinning prefactor U₁
+and the solvent viscosity.  Independent of h*_K and of g0.  (The function name
+keeps the older symbol λ₀ for λ₁,₀.)
 """
 @inline cu_lambda0_ratio(phi::Float64, p::Float64)::Float64 = (1.0 + phi^p)^(1.0 / p)
 
 """
     g1d_factor(s, g0, p) -> g
 
-U_1D relaxation factor g(s) = g0 + (1 − g0)/(1 + s^p)^(1/p). Returns exactly 1.0
-when g0 == 1 (factor off).
+Relaxation-time factor g(s) = g0 + (1 − g0)/(1 + s^p)^(1/p) of the archived CU
+scheme. Returns exactly 1.0 when g0 == 1 (factor off).
 """
 @inline function g1d_factor(s::Float64, g0::Float64, p::Float64)::Float64
     g0 == 1.0 && return 1.0
@@ -210,16 +237,27 @@ end
 """
     drag_draining_ratio(hK_star, NK_per_blob) -> alpha
 
-Kirkwood-Riseman draining factor for an isotropic random-walk blob.
+Kirkwood–Riseman draining function α(h*_K, N) of an isotropic random-walk blob:
+the blob's friction coefficient divided by η_s times its size (report Sec. 2.1.2,
+Eq. for α; the polynomial fit is the one quoted there).
 
-  hK_star     : Kuhn HI parameter  a_K / (√π b_K)  > 0
-  NK_per_blob : number of Kuhn segments in the blob  (≥ 1; Inf for non-draining limit)
+Arguments
+---------
+  hK_star     : hydrodynamic-interaction (HI) parameter of a Kuhn segment,
+                h*_K = a_K/(√π b_K) > 0, with a_K the segment's hydrodynamic radius
+                and b_K its length (dimensionless; typically 0.01–0.3)
+  NK_per_blob : number of Kuhn segments in the blob, N ≥ 1 (Inf gives the
+                non-draining limit)
 
-Returns α (dimensionless), same size as NK_per_blob.
+Returns α (dimensionless).  A vector of N values returns a vector of α.
 
-Asymptotes:
-  NK_per_blob → ∞ : α → 3π/1.6366 ≈ 5.775  (universal non-draining limit)
-  NK_per_blob = 1  : α = 6π^(3/2) h*_k
+Limits:
+  N → ∞ : α → α_∞ = 3π/1.6366 ≈ 5.76  (universal non-draining limit)
+  N = 1 : α = 6π^(3/2) h*_K            (free-draining single segment)
+For h*_K below ≈ 0.176 the blob is partially draining (α < α_∞, rising to α_∞
+as N grows); above it α starts above α_∞ and falls to it.
+
+Example: `drag_draining_ratio(0.25, 5000.0)` ≈ 5.77.
 """
 function drag_draining_ratio(hK_star::Float64, NK_per_blob::Real)::Float64
     hK_star > 0 || error("hK_star must be > 0, got $(hK_star)")
@@ -228,9 +266,8 @@ function drag_draining_ratio(hK_star::Float64, NK_per_blob::Real)::Float64
     aK = sqrt(π) * hK_star
 
     if isinf(NK_per_blob)
-        # Non-draining limit: 1/x → 0, polynomial fits → constants
-        # P1 → 0.91,  P2 → 1.6
-        # α = 3π / P2(∞)  from the formula below with x→∞
+        # Non-draining limit: 1/x → 0, the polynomial fits tend to constants
+        # (P1 → 0.9119, P2 → 1.6366) and α = 3π/P2(∞) = 5.7588.
         return 3π / 1.6366
     end
 
@@ -280,24 +317,44 @@ end
                     g0_1D=DEFAULT_G0_1D, s_form=DEFAULT_S_FORM, q_oes=DEFAULT_Q_OES)
                    -> (zeta_ratio, diag)
 
-Compute ζ/ζ_Z for a single stretch value E = |R|/R₀ ≥ 1.
+Chain drag ζ relative to the dilute equilibrium (Zimm) drag ζ_Z, at one stretch
+E and overlap ratio φ (report Secs. 2.1.4–2.1.8).  E is clamped to [1, √N_K].
 
-drag_model      : :constant | :c1d2 | :c2d2
-draining_model  : :nondraining | :partialdraining
-drag_interp     : :rp (default, report scheme) | :rpd | :rpdw | :rpdp (overlap-dressed RP)
-                  | :cu (Churchill–Usagi blend) | :oescui | :oesi | :barecui | :barei
-                  (the v2 family: overlap-enhanced shielding and/or capped CU blend);
-                  only consulted for drag_model = :c2d2
-p_phi           : CU exponent; only consulted for drag_interp = :cu, :oescui and :barecui.
+Arguments
+---------
+E               : chain stretch (end-to-end distance over the equilibrium coil size; 1 at rest)
+phi             : overlap ratio φ = c/c* ≥ 0
+hK_star         : HI parameter of a Kuhn segment (see `drag_draining_ratio`)
+NK              : number of Kuhn segments in the chain
+drag_model      : :constant (ζ = ζ_Z always) | :c1d2 (depends on E only, dilute tension
+                  blobs) | :c2d2 (depends on E and φ)
+draining_model  : :partialdraining (α from the Kirkwood–Riseman fit) | :nondraining (α = α_∞)
+drag_interp     : interpolation scheme for :c2d2 (see the module docstring):
+                  :rp (default) | :barei | :barecui | :oesi | :oescui, and the archived
+                  :cu | :rpd | :rpdw | :rpdp.  Ignored for the other drag models.
+p_phi           : Churchill–Usagi exponent, used by :cu, :oescui and :barecui.
                   Defaults to the scheme's own value (1.86 for CU, 2.0 for the CUI schemes)
-g0_1D, s_form   : U_1D relaxation factor g(s) (CU only; g0_1D = 1 → off). The CU branch
-                  returns ζ_eff = g(s)·ζ; diagnostics carry `g1d`, `s1d` (1.0, NaN otherwise)
-q_oes           : stretch-delayed OES dressing exponent, ψ = min(φ/E^q, 1) (OESI/OESCUI only;
-                  default 0 = ψ = min(φ, 1), bit-identical to 2026-10-22 am)
+q_oes           : stretch-delayed shielding exponent, ψ = min(φ/E^q, 1), for :oesi and
+                  :oescui only (default 0: ψ = min(φ, 1))
+g0_1D, s_form   : relaxation-time factor g(s) of the archived :cu scheme (g0_1D = 1 → off);
+                  the CU branch then returns ζ_eff = g(s)·ζ
 
-diag is a NamedTuple with fields: G, blob_drag_ratio, n_blob, xi_blob, blob_type.
-For :cu, :oescui and :barecui, `G` is the effective value G_eff = blob_drag_ratio·n_blob/zeta_ratio
-so that the :blob spectrum stays consistent with the chain drag.
+Returns
+-------
+zeta_ratio : ζ/ζ_Z (dimensionless, ≥ 1 for the shipped schemes at φ ≥ 0)
+diag       : NamedTuple (G, blob_drag_ratio, n_blob, xi_blob, blob_type, g1d, s1d):
+             the blob count n_blob and size xi_blob (in units of E₀) of the regime the
+             chain is in (blob_type :T tension blobs, :C correlation blobs, :NA), the
+             drag of one blob relative to ζ_Z, and the Batchelor-type factor G that the
+             blob relaxation spectrum uses (Spectrum.jl).  For the Churchill–Usagi
+             schemes G is the effective value blob_drag_ratio·n_blob/zeta_ratio, so the
+             spectrum stays consistent with the blended drag.  g1d and s1d are 1.0 and
+             NaN except for the CU scheme.
+
+Example
+-------
+    ζ, d = drag_ratio_zimm(10.0, 3.0, 0.04, 11186.0, :c2d2, :partialdraining;
+                           drag_interp = :oescui, q_oes = 0.25)
 """
 function drag_ratio_zimm(E::Float64, phi::Float64, hK_star::Float64, NK::Float64,
                          drag_model::Symbol, draining_model::Symbol;
@@ -359,11 +416,13 @@ end
 """
     _alpha_dressed(alpha_bare, psi) -> α
 
-Overlap-dressed shielding factor (RP, 2026-10-20; drag_interp = :rpd). ψ = φE is the
-overlap volume fraction of the (partially stretched) chain, 2016 JOR Eq. 29. As ψ → 1 the
-interior of the chain is no longer distinguishable from its surroundings and the core blob
-becomes non-draining: α = α_bare + (α_∞ − α_bare)·ψ for ψ < 1, α = α_∞ for ψ ≥ 1.
-All correlation blobs (ψ ≥ 1 by construction) are therefore non-draining.
+Shielding factor of the archived RPD/RPDW/RPDP schemes. ψ is an overlap measure of
+the (partially stretched) chain (ψ = φE is its overlap volume fraction, Prabhakar
+et al., J. Rheol. 2016, Eq. 29). As ψ → 1 the interior of the chain is no longer
+distinguishable from its surroundings and the core blob becomes non-draining:
+α = α_bare + (α_∞ − α_bare)·ψ for ψ < 1, α = α_∞ for ψ ≥ 1.  All correlation blobs
+(ψ ≥ 1 by construction) are therefore non-draining.  The shipped shielded-blob
+schemes use the same idea with ψ = min(φ/E^q, 1) (see `_v2_weak`).
 """
 @inline function _alpha_dressed(alpha_bare::Float64, psi::Float64)::Float64
     a_inf = 3π / 1.6366
@@ -371,13 +430,22 @@ All correlation blobs (ψ ≥ 1 by construction) are therefore non-draining.
     return alpha_bare + (a_inf - alpha_bare) * max(psi, 0.0)
 end
 
+"""
+    _drag_c2d2(E, phi, hK_star, NK, alphaZ, draining_model; dressed=false, psi_form=:phiE)
+
+The original interpolation (RPI; report Sec. 2.1.8).  For E > φ the chain is a string
+of N_t = E² tension blobs of size ξ_t = 1/E whose drag is reduced by the Batchelor-type
+factor G = G₁/G₂ (slender-body hydrodynamics with the screening length χ); for E ≤ φ
+it is a string of N_c = φ² correlation blobs of size 1/φ.  The two expressions meet
+with a slope corner at E = φ.  `dressed = true` gives the archived RPD-family schemes.
+"""
 function _drag_c2d2(E::Float64, phi::Float64, hK_star::Float64, NK::Float64,
                     alphaZ::Float64, draining_model::Symbol; dressed::Bool=false,
                     psi_form::Symbol=:phiE)
     E_max = sqrt(NK)
     # dressing variable (used only if dressed):
-    #   :phiE       ψ = φE, overlap volume fraction of the stretched chain (2016 Eq. 29)      [RPD]
-    #   :phi_over_E ψ = φ/E, reaches 1 on the weak/strong-overlap boundary E = φ (2016 Eq. 40) [RPDW]
+    #   :phiE       ψ = φE, overlap volume fraction of the stretched chain                   [RPD]
+    #   :phi_over_E ψ = φ/E, reaches 1 on the weak/strong-overlap boundary E = φ            [RPDW]
     #   :phi        ψ = φ, coil overlap only; stretch neither advances nor delays it         [RPDP]
     #   all give ψ = φ for coils (E = 1).
     psi   = psi_form === :phi_over_E ? phi / E : psi_form === :phi ? phi : phi * E
@@ -437,8 +505,9 @@ end
 """
     _drag_c2d2_cu(E, phi, hK_star, NK, alphaZ, draining_model, p_phi)
 
-Churchill–Usagi (CU) drag-interpolation scheme for drag_model = :c2d2
-(Aru → Ko handover 2026-10-15; overlap-crossover note Secs. 3.4 and 4).
+Archived Churchill–Usagi (CU) drag-interpolation scheme for drag_model = :c2d2:
+the first smooth blend of the two limits, superseded by the bare-blob and
+shielded-blob schemes (`_drag_c2d2_v2`).  Kept so that earlier runs reproduce.
 
     ζ/ζ_Z = (ζ_w^p + ζ_s^p)^(1/p),   p = p_phi
 
@@ -460,7 +529,7 @@ Diagnostics keep the RP regime-based definitions (n_blob, xi_blob, blob_drag_rat
 blob_type = :T if E > φ else :C); G is returned as G_eff = blob_drag_ratio·n_blob/ζ
 with the BARE ζ (so the blob spectrum is unaffected by g).
 
-U_1D relaxation factor (2026-10-17): with `g0_1D ≠ 1` the returned `zeta_ratio` is
+Relaxation-time factor: with `g0_1D ≠ 1` the returned `zeta_ratio` is
 ζ_eff = g(s)·ζ, s = N_c + N_t − 2, N_t = clamp(E²,1,N_K), N_c from `_Nc_of(s_form)`
 (smooth N_c′ for `:sum`, clamp(φ²,1,N_K) for `:sum_hard`); `g1d` and `s1d` are added
 to the diagnostics. See `g1d_factor`.
@@ -528,36 +597,38 @@ function _drag_c2d2_cu(E::Float64, phi::Float64, hK_star::Float64, NK::Float64,
                       blob_type=btype, g1d=g1d, s1d=s1d)
 end
 
-# ── OESI family (v2): overlap-enhanced shielding interpolation, 2026-10-21/22 ─
+# ── Bare-blob and shielded-blob schemes (report Secs. 2.1.4–2.1.7) ────────────
 #
-# Four schemes on one code path, `_drag_c2d2_v2(…; oes, cui, p_phi)`:
+# Four schemes on one code path, `_drag_c2d2_v2(…; oes, cui, p_phi, q_oes)`, selected
+# by two switches: OES (overlap-enhanced shielding: overlapping chains make the blobs
+# non-draining) and CUI (Churchill–Usagi blend of the two limits, capped at the Rouse
+# drag, instead of a hard switch at E = φ):
 #
-#     drag_interp   oes   cui
-#     :oescui       on    on     RP's adopted form (OES + capped Churchill–Usagi blend)
-#     :oesi         on    off
-#     :barecui      off   on
-#     :barei        off   off    bare C2D2 with the 21-Oct dilute/weak boundary and D(A)
+#     drag_interp   oes   cui    report name
+#     :oescui       on    on     shielded-blob model, smooth join (our current work)
+#     :oesi         on    off    shielded-blob model, switch at E = φ
+#     :barecui      off   on     bare-blob model, smooth join
+#     :barei        off   off    bare-blob model, switch at E = φ
 #
-# Aru → Ko handovers 2026-10-21 (`oesi-drag-interp`) and 2026-10-22 (`oescui-D-pphi-
-# switches`); OES note `c2d2_OES.pdf` Secs. 3.1–3.7; reference `oesi.py:zeta_v2`.
-# Revision of 2026-10-22: the Batchelor factor 1 + ln J(A) is replaced by the monotone
-# D(A) below, p_phi defaults to 2.0 for the CUI schemes, and OES / CUI are switchable.
+# The reference implementation used by the kernel tests is
+# docs/validation/2026-10-22_oesi_v2/oesi.py (function zeta_v2).
 
-"""Non-draining limit of the Kirkwood–Riseman shielding factor α (Drag.jl fit)."""
+"""Non-draining limit α_∞ = 3π/1.6366 ≈ 5.76 of the Kirkwood–Riseman draining function."""
 const _ALPHA_INF = 3π / 1.6366
 
-"""Default Churchill–Usagi exponent for the CUI schemes (:oescui, :barecui; 2026-10-22 fit)."""
+"""Default Churchill–Usagi exponent for the CUI schemes (:oescui, :barecui); report Sec. 2.1.5."""
 const DEFAULT_P_PHI_OESCUI = 2.0
 
-"""Default stretch-delayed OES dressing exponent q_oes (0 = ψ = min(φ, 1); Thin-n-Win runs use 0.25)."""
+"""Default stretch-delayed shielding exponent q_oes (0: ψ = min(φ, 1); our capillary-thinning work uses 0.25)."""
 const DEFAULT_Q_OES = 0.0
 
 """
     oesi_dressing_E(phi, q_oes, E_max) -> E_q
 
-Stretch at which the stretch-delayed OES dressing ψ = min(φ/E^q, 1) leaves 1 at fixed φ > 1:
-E_q = φ^(1/q) (> φ for 0 < q < 1).  A slope corner of the OES schemes in E (2026-10-22 pm).
-NaN if q = 0 (ψ = min(φ, 1), no corner in E), φ ≤ 1 (ψ < 1 for every E > 1) or E_q ≥ E_max.
+Stretch at which the stretch-delayed shielding factor ψ = min(φ/E^q, 1) leaves 1 at
+fixed φ > 1: E_q = φ^(1/q) (> φ for 0 < q < 1).  A slope corner of the shielded-blob
+schemes in E (report Sec. 2.1.6).  NaN if q = 0 (ψ = min(φ, 1), no corner in E),
+φ ≤ 1 (ψ < 1 for every E > 1) or E_q ≥ E_max.
 """
 function oesi_dressing_E(phi::Float64, q_oes::Float64, E_max::Float64)::Float64
     (q_oes > 0.0 && phi > 1.0) || return NaN
@@ -569,8 +640,8 @@ end
     default_p_phi(drag_interp) -> p
 
 Scheme-dependent default of the Churchill–Usagi exponent `p_phi`: `DEFAULT_P_PHI_OESCUI`
-(2.0) for `:oescui` / `:barecui`, `DEFAULT_P_PHI` (1.86, Martin's correlation at rest) for
-`:cu` and everything else (including the `cu_fit` De₀ with a non-CUI drag).
+(2.0) for `:oescui` / `:barecui`, `DEFAULT_P_PHI` (1.86, the Martin correlation at rest) for
+`:cu` and everything else (including the legacy `De_mode = "cu_fit"` with a non-CUI drag).
 """
 default_p_phi(drag_interp::Symbol)::Float64 =
     drag_interp in (:oescui, :barecui) ? DEFAULT_P_PHI_OESCUI : DEFAULT_P_PHI
@@ -578,33 +649,36 @@ default_p_phi(drag_interp::Symbol)::Float64 =
 """
     oesi_shape_D(A) -> D
 
-Monotone shape factor D(A) of the v2 family, replacing 1 + ln J(A) (OES note Sec. 3.7):
+Shape factor D(A) of the tension-blob drag in the bare-blob and shielded-blob schemes
+(report Sec. 2.1.5, "Weakly screened (tension-blob) drag"), where A = min(E², χ/ξ_t)
+is the aspect ratio of the slender body that the string of tension blobs forms:
 
     D(A) = sqrt(A)       for A ≤ 4
          = 2 + ln(A/4)   for A > 4
 
 D(1) = 1 and D is C¹ at A = 4 (value 2, slope 1/4).  In the dilute regime (A = E²) the
-shape factor E/D(E²) is 1 up to E = 2 and x/(1 + ln x), x = E/2, beyond: non-decreasing,
-and Batchelor's E/ln(kE²) with k = e²/4 at large E.  E/(1 + ln J(E²)) instead rose to
-1.10 at E ≈ 1.2 and dipped to 1.01 at E ≈ 2.1 (non-monotone dilute drag).
+drag factor E/D(E²) is 1 up to E = 2 and x/(1 + ln x), x = E/2, beyond: non-decreasing,
+and equal to Batchelor's slender-body result E/ln(kE²) with k = e²/4 at large E.  The
+original interpolation's factor E/(1 + ln J(E²)) is not monotone (it rises to 1.10 at
+E ≈ 1.2 and dips to 1.01 at E ≈ 2.1), which is why D(A) replaces it.
 """
 @inline oesi_shape_D(A::Float64)::Float64 = A <= 4.0 ? sqrt(A) : 2.0 + log(A / 4.0)
 
 """
     _v2_weak(E, phi, hK_star, NK, alphaZ, draining_model, oes, q_oes) -> (zeta_w, zbT, nT, xiT, D)
 
-Tension-blob ("weak") drag of the v2 family (OES note Eqs. 3.1–3.9 with D in place of
-1 + ln J), valid for φ < E and continued with A = 1 for φ ≥ E:
+Weakly screened (tension-blob) drag of the bare-blob and shielded-blob schemes
+(report Secs. 2.1.4–2.1.6), valid for φ < E and continued with A = 1 for φ ≥ E:
 
-    N_t     = clamp(E², 1, N_K),   ξ_t = 1/E,   a = α(h*_K, N_K/N_t)
-    α_T     = a + (α_∞ − a)·min(φ/E^q, 1), q = q_oes   (oes)   |   a   (bare)
-    φ_t     = φ/E,   χ/ξ_t = sqrt((1 + ln(1/φ_t))/φ_t)   (regularised Mackaplow–Shaqfeh; ∞ at φ = 0)
+    N_t     = clamp(E², 1, N_K),   ξ_t = 1/E,   a = α(h*_K, N_K/N_t)      (tension blobs)
+    α_T     = a + (α_∞ − a)·min(φ/E^q, 1), q = q_oes   (shielded)   |   a   (bare)
+    φ_t     = φ/E,   χ/ξ_t = sqrt((1 + ln(1/φ_t))/φ_t)   (weak-screening length; ∞ at φ = 0)
     A       = min(E², χ/ξ_t)   for φ < E   |   1   for φ ≥ E
     ζ_w/ζ_Z = (α_T ξ_t/α_Z)·N_t/D(A)
 
-With oes on and φ ≥ E (so φ ≥ 1 and, for q ≤ 1, φ/E^q ≥ E^(1−q) ≥ 1), ψ = 1 and
-ζ_w = (α_∞/α_Z)·E, as in the 21-Oct OESCUI; the dressing therefore completes at φ = E^q
-instead of φ = 1 (q = 0 reproduces ψ = min(φ, 1) exactly, since E^0 = 1).
+With shielding on and φ ≥ E (so φ ≥ 1 and, for q ≤ 1, φ/E^q ≥ E^(1−q) ≥ 1), ψ = 1 and
+ζ_w = (α_∞/α_Z)·E; the shielding is therefore complete at φ = E^q instead of φ = 1
+(q = 0 reproduces ψ = min(φ, 1) exactly, since E^0 = 1).
 """
 @inline function _v2_weak(E::Float64, phi::Float64, hK_star::Float64, NK::Float64,
                           alphaZ::Float64, draining_model::Symbol, oes::Bool, q_oes::Float64)
@@ -627,15 +701,16 @@ end
 """
     _v2_strong(phi, hK_star, NK, alphaZ, draining_model, oes) -> (zeta_s, zbC, nC, xiC)
 
-Correlation-blob ("strong") drag of the v2 family, continued to all φ (OES note Eq. 3.10):
+Strongly screened (correlation-blob) drag of the bare-blob and shielded-blob schemes,
+continued to all φ (report Sec. 2.1.5, "Strongly screened (correlation-blob) drag"):
 
     N_c     = min(max(φ, 1)², N_K),   ξ_c = 1/min(max(φ, 1), √N_K)
-    α_S     = α_∞   (oes)   |   α(h*_K, N_K/N_c)   (bare)
+    α_S     = α_∞   (shielded)   |   α(h*_K, N_K/N_c)   (bare)
     ζ_s/ζ_Z = (α_S/α_Z)·min(φ, √N_K)
 
 For φ ≥ 1 this is ζ_bC·N_c with the blob diagnostics returned; for φ < 1 it is the formal
-continuation (α_S/α_Z)·φ used only inside the CUI blend.  With oes off the bare strong drag
-at rest is the original C2D2 blob model, φ·α(h*_K, N_K/φ²)/α_Z.
+continuation (α_S/α_Z)·φ used only inside the Churchill–Usagi blend.  With shielding off
+the strong drag at rest is the original blob model, φ·α(h*_K, N_K/φ²)/α_Z.
 """
 @inline function _v2_strong(phi::Float64, hK_star::Float64, NK::Float64,
                             alphaZ::Float64, draining_model::Symbol, oes::Bool)
@@ -647,7 +722,8 @@ at rest is the original C2D2 blob model, φ·α(h*_K, N_K/φ²)/α_Z.
     return (aS / alphaZ) * min(phi, E_max), zbC, nC, xiC
 end
 
-"""Rouse cap of the CUI blend: (α_∞/α_Z)·√N_K with oes, (α(h*_K, 1)/α_Z)·√N_K bare."""
+"""Rouse cap of the Churchill–Usagi blend, the drag of N_K free-draining Kuhn segments:
+(α_∞/α_Z)·√N_K with shielding, (α(h*_K, 1)/α_Z)·√N_K bare (report Sec. 2.1.5)."""
 @inline function _v2_cap(hK_star::Float64, NK::Float64, alphaZ::Float64,
                          draining_model::Symbol, oes::Bool)
     a1 = oes ? _ALPHA_INF : _alpha_blob(hK_star, NK, NK, draining_model)
@@ -657,7 +733,8 @@ end
 """
     _drag_c2d2_v2(E, phi, hK_star, NK, alphaZ, draining_model; oes, cui, p_phi, q_oes)
 
-The v2 drag-interpolation family for drag_model = :c2d2 (reference `oesi.py:zeta_v2`):
+The bare-blob and shielded-blob drag schemes for drag_model = :c2d2 (report
+Secs. 2.1.5–2.1.7; reference implementation `oesi.py:zeta_v2` under docs/validation):
 
     ζ_w = `_v2_weak`  (tension blobs; A = 1 continuation for φ ≥ E)
     ζ_s = `_v2_strong` (correlation blobs; continued to φ < 1)
@@ -666,16 +743,18 @@ The v2 drag-interpolation family for drag_model = :c2d2 (reference `oesi.py:zeta
                                  cap = (α_∞ | α(h*_K,1))/α_Z · √N_K   (`_v2_cap`)
 
 Continuous in φ and E for all four schemes (A is continuous across the dilute/weak boundary
-φE³ = 1 + ln(E/φ); at E = φ, A = 1, D = 1 and N_t = N_c, so with oes off ζ_w = ζ_s there as
-well).  The Rouse cap removes the double counting of the blend once both arms reach single
-Kuhn segments.  At rest ζ₀ is the same function at E = 1, so Λ = 1 at rest automatically;
-with oes off and cui off, ζ₀/ζ_Z = 1 for φ ≤ 1 and φ·α(h*_K, N_K/φ²)/α_Z above (the original
-blob model).  With `draining_model = :nondraining` α ≡ α_∞ and oes is a no-op.
+φE³ = 1 + ln(E/φ); at E = φ, A = 1, D = 1 and N_t = N_c, so with shielding off ζ_w = ζ_s
+there as well).  The slope has corners at E = φ, at the dilute/weak boundary, where the
+Rouse cap engages and, for q_oes > 0, at E = φ^(1/q); the look-up table is split at each.
+The Rouse cap removes the double counting of the blend once both arms reach single Kuhn
+segments.  At rest ζ₀ is the same function at E = 1, so Λ = 1 at rest automatically; with
+shielding and blend both off, ζ₀/ζ_Z = 1 for φ ≤ 1 and φ·α(h*_K, N_K/φ²)/α_Z above (the
+original blob model).  With `draining_model = :nondraining` α ≡ α_∞ and shielding is a no-op.
 
 Diagnostics (regime by E > φ): `blob_type` :T / :C, `n_blob`, `xi_blob`, `blob_drag_ratio`;
 `G` = D(A) (:T) or 1.0 (:C) for the switched schemes, and the effective value
-G_eff = blob_drag_ratio·n_blob/ζ for the CUI schemes (so the :blob spectrum stays
-consistent with the chain drag, as in the CU branch); `g1d = 1.0`, `s1d = NaN`.
+G_eff = blob_drag_ratio·n_blob/ζ for the blended schemes (so the :blob spectrum stays
+consistent with the chain drag); `g1d = 1.0`, `s1d = NaN`.
 """
 function _drag_c2d2_v2(E::Float64, phi::Float64, hK_star::Float64, NK::Float64,
                        alphaZ::Float64, draining_model::Symbol;
@@ -709,9 +788,10 @@ end
 """
     oesi_dilute_weak_E(phi, E_max) -> E_b
 
-Stretch at which a chain at concentration 0 < φ < 1 leaves the dilute regime of the v2
-family: the root E > 1 of φE³ = 1 + ln(E/φ), i.e. where the regularised screening length χ
-equals the chain length (OES note Eq. 3.4).  Bisection in ln E on [0, ln E_max];
+Stretch at which a chain at overlap ratio 0 < φ < 1 leaves the dilute regime of the
+bare-blob and shielded-blob schemes: the root E > 1 of φE³ = 1 + ln(E/φ), i.e. where the
+weak-screening length χ equals the chain length (report Sec. 2.1.4, "The dilute/weakly
+screened boundary").  Bisection in ln E on [0, ln E_max];
 f(ln E) = φE³ − 1 − ln E + ln φ is increasing for E > 1 when φE³ > 1/3, which holds
 beyond the root region of interest.  Returns NaN if there is no root in (1, E_max)
 (the chain is dilute up to full stretch) or if φ ∉ (0, 1).
@@ -732,13 +812,13 @@ end
 """
     _v2_cap_E(phi, hK_star, NK, draining_model, oes, p_phi, q_oes=0) -> E_cap
 
-Stretch at which the Rouse cap of a CUI scheme engages for 1 < φ < √N_K: the smallest E in
-(1, √N_K) where the uncapped blend (ζ_w^p + ζ_s^p)^(1/p) reaches the cap.  It can lie
-below E = φ or above it (OESCUI, N_K = 5000, h*_K = 0.025: E_cap ≈ 34.5 for φ = 60,
-≈ 53.2 for φ = 45).  The blend need not be monotone in E for the bare scheme (the draining
-tension-blob drag can fall with E at small h*_K), so the first crossing is bracketed on a
-dense log grid and then bisected.  NaN if the cap is not reached below E_max, or if the
-chain is capped already at E = 1 (no interior corner).
+Stretch at which the Rouse cap of a Churchill–Usagi scheme engages for 1 < φ < √N_K: the
+smallest E in (1, √N_K) where the uncapped blend (ζ_w^p + ζ_s^p)^(1/p) reaches the cap.
+It can lie below E = φ or above it (OESCUI, N_K = 5000, h*_K = 0.025: E_cap ≈ 34.5 for
+φ = 60, ≈ 53.2 for φ = 45).  The blend need not be monotone in E for the bare scheme (the
+draining tension-blob drag can fall with E at small h*_K), so the first crossing is
+bracketed on a dense log grid and then bisected.  NaN if the cap is not reached below
+E_max, or if the chain is capped already at E = 1 (no interior corner).
 """
 function _v2_cap_E(phi::Float64, hK_star::Float64, NK::Float64,
                    draining_model::Symbol, oes::Bool, p_phi::Float64,
@@ -767,18 +847,20 @@ end
 """
     DragAssessor
 
-Precomputed piecewise-cubic (PCHIP-style) interpolant of ζ/ζ_Z(E) on a
-log-spaced grid. Built once per run; queried at every spatial node and time step.
+Precomputed piecewise-cubic (PCHIP, monotone Hermite) interpolant of ζ/ζ_Z(E) on a
+log-spaced grid in E. Built once per run; queried at every evaluation of the
+constitutive equation, so the solvers never call `drag_ratio_zimm` inside a step.
 
-Handles the slope kinks at the regime boundaries by fitting separate cubics between them:
+Handles the slope corners at the regime boundaries by fitting separate cubics between them:
 `kinks` (sorted, possibly empty) and one `(xs[i], ys[i])` piece per interval, piece i
 covering E ∈ (kinks[i−1], kinks[i]] (`length(xs) == length(kinks) + 1`).  drag_model = :c2d2
-only: RP/RPD/RPDW/RPDP kink at E = φ (φ > 1; RPD also at E = 1/φ for φ < 1); the v2 family
-(OESCUI/OESI/BARECUI/BAREI) kinks at E = φ for φ > 1 and at the dilute/weak boundary E_b(φ)
-for 0 < φ < 1 (`oesi_dilute_weak_E`), the OES schemes with q_oes > 0 also where the dressing
-leaves ψ = 1, E_q = φ^(1/q) (`oesi_dressing_E`), and the CUI schemes at the Rouse-cap onset
-when it is reached (if the cap engages below E = φ it is the only corner, the drag being
-flat beyond it).  The CU scheme is smooth and uses a single piece.
+only: the original and RPD-family schemes have a corner at E = φ (φ > 1; RPD also at E = 1/φ
+for φ < 1); the bare-blob and shielded-blob schemes have corners at E = φ for φ > 1 and at
+the dilute/weak boundary E_b(φ) for 0 < φ < 1 (`oesi_dilute_weak_E`), the shielded schemes
+with q_oes > 0 also where the shielding factor leaves ψ = 1, E_q = φ^(1/q)
+(`oesi_dressing_E`), and the blended schemes at the Rouse-cap onset when it is reached (if
+the cap engages below E = φ it is the only corner, the drag being flat beyond it).  The
+archived CU scheme is smooth and uses a single piece.
 """
 struct DragAssessor
     drag_model :: Symbol             # :constant | :c1d2 | :c2d2
@@ -799,12 +881,14 @@ end
                         n_points=400, drag_interp=:rp, p_phi=default_p_phi(drag_interp),
                         g0_1D=DEFAULT_G0_1D, s_form=DEFAULT_S_FORM, q_oes=DEFAULT_Q_OES) -> DragAssessor
 
-Build a DragAssessor by tabulating drag_ratio_zimm on a log-spaced E grid
-and fitting piecewise cubics around the slope kinks (drag_model = :c2d2: at E = φ for
-RP/RPD/RPDW/RPDP and the v2 family with φ > 1, plus E_q = φ^(1/q_oes) for the OES schemes
-and the Rouse-cap onset for the CUI schemes when reached; at E = 1/φ for RPD with φ < 1;
-at the dilute/weak boundary E_b(φ) for the v2 family with φ < 1; the CU scheme is smooth
-and is fitted as a single piece).
+Build a DragAssessor by tabulating `drag_ratio_zimm` on a log-spaced grid of
+`n_points` values of E between 1 and √N_K and fitting piecewise cubics between the
+slope corners listed in the `DragAssessor` docstring.  The keyword arguments are
+those of `drag_ratio_zimm`.  `n_points = 400` reproduces the drag to about 1e-5 near
+E ≈ 1 for the C2D2 schemes; the steady solvers use 4000 (`[model] drag_lut_n_points`).
+
+Example: `build_drag_assessor(0.1, 0.05, 3000.0, :c2d2, :partialdraining)` then
+`eval_drag(lut, 2.5)`.
 """
 function build_drag_assessor(phi::Float64, hK_star::Float64, NK::Float64,
                               drag_model::Symbol, draining_model::Symbol;
@@ -824,7 +908,7 @@ function build_drag_assessor(phi::Float64, hK_star::Float64, NK::Float64,
                               g0_1D=g0_1D, s_form=s_form, q_oes=q_oes)[1]
               for e in E_grid]
 
-    # Locate kink: only c2d2 (RP scheme) with phi > 1 has a kink at E = phi
+    # Locate the corner: the original scheme (c2d2, RP) with phi > 1 has one at E = phi
     has_kink = (drag_model === :c2d2) && (drag_interp in (:rp, :rpd)) &&
                (phi > 1.0) && (phi < E_max)
     kink_E   = has_kink ? phi : NaN
@@ -838,21 +922,21 @@ function build_drag_assessor(phi::Float64, hK_star::Float64, NK::Float64,
         has_kink = true
         kink_E   = 1.0 / phi
     end
-    # v2 family (2026-10-21/22): one slope corner per φ — at E = φ for 1 < φ < E_max
-    # (weak/strong switch; A = min(E², χ/ξ_t) has its corner there for every scheme), at
-    # the dilute/weak boundary E_b(φ) for 0 < φ < 1.  φ = 0 and φ = 1 have no corner (with
-    # oes off there is no ψ corner at φ = 1 either).
+    # Bare-blob and shielded-blob schemes: corners at E = φ for 1 < φ < E_max (weak/strong
+    # switch; A = min(E², χ/ξ_t) has its corner there for every scheme) and at the
+    # dilute/weak boundary E_b(φ) for 0 < φ < 1.  φ = 0 and φ = 1 have no corner (with
+    # shielding off there is no ψ corner at φ = 1 either).
     if drag_model === :c2d2 && drag_interp in _V2_SCHEMES
         oes, cui = _v2_switches(drag_interp)
         corners = Float64[]
         if phi > 1.0 && phi < E_max
-            # Since D(A) has slope 1/2 at A = 1 (the old 1 + ln J was flat there), E = φ is a
-            # genuine slope corner for all four schemes, the CUI ones included.  With q_oes > 0
-            # the OES dressing ψ = min(φ/E^q, 1) leaves 1 at E_q = φ^(1/q) > φ (second corner).
-            # For the CUI schemes the Rouse cap min(·, cap) is a further corner once it engages
-            # below E_max (OESCUI: φ ≳ 37 for N_K = 5000); the drag is flat beyond it, so any
-            # corner above the cap onset disappears (and if the cap engages below E = φ it is
-            # the only corner).
+            # Since D(A) has slope 1/2 at A = 1 (the original 1 + ln J was flat there), E = φ
+            # is a genuine slope corner for all four schemes, the blended ones included.  With
+            # q_oes > 0 the shielding factor ψ = min(φ/E^q, 1) leaves 1 at E_q = φ^(1/q) > φ
+            # (second corner).  For the blended schemes the Rouse cap min(·, cap) is a further
+            # corner once it engages below E_max (OESCUI: φ ≳ 37 for N_K = 5000); the drag is
+            # flat beyond it, so any corner above the cap onset disappears (and if the cap
+            # engages below E = φ it is the only corner).
             E_cap = cui ? _v2_cap_E(phi, hK_star, NK, draining_model, oes, p_phi, q_oes) : NaN
             E_q   = oes ? oesi_dressing_E(phi, q_oes, E_max) : NaN
             for c in (phi, E_q, E_cap)
@@ -869,8 +953,8 @@ function build_drag_assessor(phi::Float64, hK_star::Float64, NK::Float64,
         corners = [c for (i, c) in enumerate(corners) if i == 1 || c > corners[i-1] * (1 + 1e-9)]
         if !isempty(corners)
             # Split at the corners themselves (inserted as grid nodes), so no piece contains a
-            # segment straddling one; the straddling-segment split used by the RP family is
-            # left untouched for bit-identity.
+            # segment straddling one; the straddling-segment split used by the original scheme
+            # below is left as it is so that its results do not change.
             f(e) = drag_ratio_zimm(e, phi, hK_star, NK, drag_model, draining_model;
                                    drag_interp=drag_interp, p_phi=p_phi,
                                    g0_1D=g0_1D, s_form=s_form, q_oes=q_oes)[1]

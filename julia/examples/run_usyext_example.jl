@@ -1,11 +1,18 @@
-# Minimal USYEXT (uniaxial step-strain / CaBER-type) example for C2D2.
+# Capillary thinning (CaBER-type) with C2D2.jl: the smallest complete run.
 #
 #   julia julia/examples/run_usyext_example.jl
 #
-# Loads a reference TOML, integrates the transient uniaxial-extension /
-# capillary-thinning ODE with the adaptive ETD2 integrator, and writes a
-# summary CSV plus a CaBER stress-decomposition diagnostic CSV.
-# Depends only on the Julia standard library (LinearAlgebra, Printf, TOML).
+# Reads julia/examples/inputs/caber_example.toml (every key is commented there
+# and in docs/input_reference.md), integrates the chain conformation through
+# the thinning of a filament with the adaptive exponential time-differencing
+# integrator, and writes two files to julia/examples/output/ (columns in
+# docs/output_reference.md):
+#   usyext_summary.csv     strain, time, Wi, stretch, stresses, extensional viscosity
+#   usyext_caber_diag.csv  the terms of the capillary stress balance at each sample
+# The solver uses only the Julia standard library.
+#
+# The same script runs start-up of extension at constant Wi if the TOML has
+# [flow] kind = "constant".
 
 const _MODELS = joinpath(@__DIR__, "..", "models")
 
@@ -27,13 +34,14 @@ include(joinpath(_MODELS, "front_end", "UsyextRunContext.jl"))
 using .UsyextRunContext: load_usyext_context, build_initial_M
 using .UsyextIntegrator: integrate_usyext, write_summary_csv, write_caber_diag_csv
 
-# Reference input: FENE-PM, constant drag, Nm=1, phi=0.03, De=1.0.
-toml_path = joinpath(@__DIR__, "..", "experiments", "c2d2ref", "inputs", "usyext_ref_01.toml")
+toml_path = joinpath(@__DIR__, "inputs", "caber_example.toml")
 
 # load_usyext_context returns (runtime_ctx, flow, integration_plan, tol_opts).
+# The keyword `De` overrides [flow] De of the file: handy for De sweeps.
 ctx, flow, plan, tol = load_usyext_context(toml_path; De = 1.0)
 
-# Optional pre-stretched initial conformation (nothing -> equilibrium IC).
+# Initial conformation: `nothing` means chains at rest; the TOML's
+# [initial_condition] section can ask for a pre-stretched start instead.
 M0 = build_initial_M(toml_path, ctx)
 
 traj = integrate_usyext(ctx, flow, plan, tol; M0 = M0)

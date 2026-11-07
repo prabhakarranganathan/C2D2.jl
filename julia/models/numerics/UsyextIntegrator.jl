@@ -1,36 +1,39 @@
 """
     UsyextIntegrator.jl
 
-Adaptive ETDRK2 integrator for unsteady extension (USYEXT).
-
-Mirrors MATLAB's usyext_etd2_strain.m.
+Adaptive exponential time-differencing (ETD) integrator for unsteady extension
+(USYEXT): start-up of extension at constant Wi and capillary thinning.
+Technical report Ch. 4 (Secs. 4.1–4.2 for the scheme, Sec. 4.5.1 for capillary
+thinning).
 
 Algorithm
 ---------
-Integrates the diagonal modal conformation tensors M ∈ ℝ^{Nm×3} forward in
-Hencky strain (or dimensionless time in low-Wi regimes).  The integration
-variable switches automatically based on Wi (hybrid mode).
+Integrates the diagonal modal conformation tensors M ∈ ℝ^{Nm×3} (columns xx, yy,
+zz) forward in Hencky strain ε, or in dimensionless time t/λ₁,₀ when Wi is small
+(`[integration] independent = "auto"` switches between the two).
 
 Each accepted step uses an embedded ETD1/ETD2 pair:
-  ETD1 (predictor / stage-a):  1st-order exponential integrator
-  ETD2 (corrected):            2nd-order exponential integrator
+  ETD1 (predictor):  first-order exponential Euler
+  ETD2 (corrector):  second-order exponential Runge–Kutta (ETD2RK)
 
-The local error estimate is |M_ETD2 - M_ETD1| scaled by atol + rtol·|M|.
-Step size is adapted using a PI-like controller (safety * errn^{-1/2}).
+The local error estimate is |M_ETD2 − M_ETD1| scaled by atol + rtol·|M|.
+The step size is adapted with the usual controller (safety × err^(−1/2)).
 
 Output
 ------
-  Vector{UsyextPoint} — one entry per sample strain, plus (possibly) a
-  truncated entry if a termination condition is hit first.
+  Vector{UsyextPoint}: one entry per sample strain of the `[output]` schedule,
+  the last one with status :terminated if a stopping condition (stretch cap,
+  non-finite state, step budget) was hit first.
 
 Public API
 ----------
-  TolOpts          — adaptive controller parameters
-  IntegrationPlan  — compiled sampling schedule
-  UsyextCtx        — polymer model context (kernel + scales)
-  UsyextPoint      — one trajectory snapshot
-  integrate_usyext — main driver; returns Vector{UsyextPoint}
-  write_summary_csv — write CSV in reference format
+  TolOpts           — adaptive controller parameters
+  IntegrationPlan   — compiled sampling schedule
+  UsyextCtx         — polymer model context (kernel + scales)
+  UsyextPoint       — one trajectory snapshot
+  integrate_usyext  — main driver; returns Vector{UsyextPoint}
+  write_summary_csv — summary.csv (columns documented in docs/output_reference.md)
+  write_caber_diag_csv — caber_diag.csv, the capillary stress balance at each sample
 """
 module UsyextIntegrator
 
@@ -50,8 +53,8 @@ export TolOpts, IntegrationPlan, UsyextCtx, UsyextPoint,
 """
     TolOpts
 
-Adaptive step-size controller parameters for the USYEXT ETDRK2 integrator.
-Mirrors MATLAB's S_ctx.tol struct.
+Adaptive step-size controller parameters for the USYEXT integrator, read from
+the TOML `[integration]` section (see docs/input_reference.md for each key).
 """
 Base.@kwdef struct TolOpts
     rtol          :: Float64 = 1e-7
@@ -115,9 +118,9 @@ i_comp   : index of primary compressive axis (argmin alphas)
 Nm       : number of modes
 E0       : equilibrium coil size √(Q₀² Nm)  — normalization for drag/spectrum LUT
 Ymax     : max_frac_stretch_sq · E∞²         — termination threshold
-lambda0  : longest relaxation time
-etas     : solvent viscosity
-ckBT     : c · k_B · T
+lambda0  : λ₁,₀, the equilibrium longest relaxation time (the time unit)
+etas     : solvent viscosity η_s
+ckBT     : c · k_B · T (the stress unit)
 """
 struct UsyextCtx
     kernel   :: CoeffsKernel
@@ -139,7 +142,8 @@ end
 """
     UsyextPoint
 
-One snapshot on the USYEXT trajectory.
+One snapshot on the USYEXT trajectory (one row of summary.csv; see
+docs/output_reference.md for the meaning and units of each field).
 
 For CaBER runs the fields R, X, psi, N1_p, K_til carry the capillary flow state.
 For constant-Wi runs those fields are NaN.
@@ -162,7 +166,7 @@ struct UsyextPoint
     X       :: Float64    # capillary geometry factor (NaN for non-CaBER)
     psi     :: Float64    # stress-balance psi  (NaN for non-CaBER)
     N1_p    :: Float64    # polymer first normal stress diff (NaN for non-CaBER)
-    K_til   :: Float64    # K̃ = φ·Γ_eq·Uz   (NaN for non-CaBER)
+    K_til   :: Float64    # K̃ = φ·U₁ (viscous) or φ·U_R (inertial): polymer-stress prefactor (NaN for non-CaBER)
     status  :: Symbol     # :ok | :terminated
 end
 
@@ -552,19 +556,33 @@ end
 # ── Main integrator ───────────────────────────────────────────────────────────
 
 """
-    integrate_usyext(ctx, flow, plan, tol) -> Vector{UsyextPoint}
+    integrate_usyext(ctx, flow, plan, tol; M0=nothing) -> Vector{UsyextPoint}
 
-Run the adaptive ETDRK2 USYEXT integrator.
+Integrate the modal conformation tensors through a transient uniaxial (or
+general shear-free) extension and return the trajectory (report Ch. 4).
 
 Arguments
 ---------
-ctx  : UsyextCtx  — polymer model context
-flow : ConstantWiFlow | CaberFlow — flow protocol
-plan : IntegrationPlan — sampling schedule + controller seeds
+ctx  : UsyextCtx — polymer model context (from `load_usyext_context`)
+flow : ConstantWiFlow | CaberFlow | CaberInertialFlow — how Wi is set at each instant
+plan : IntegrationPlan — sampling schedule + initial step sizes
 tol  : TolOpts — adaptive controller parameters
+M0   : optional Nm×3 initial conformation (columns xx, yy, zz); `nothing` starts
+       from the equilibrium coil M = I/3 (see `build_initial_M` for a pre-stretch)
 
-Returns a vector of UsyextPoint, one per sample strain.
-The last entry may have status=:terminated if a limit was hit early.
+Returns a vector of UsyextPoint, one per sample strain, each holding the Hencky
+strain, time (in units of λ₁,₀), Wi, the stretch E², the polymer stresses and the
+extensional viscosities; for capillary thinning also the filament radius R/R₀
+and the stress-balance state.  The last entry has status :terminated if the
+chains reached the stretch cap (`[limits] max_frac_stretch_sq`), the state became
+non-finite, or the step budget (`max_attempts`, `max_wall_s`) was exhausted.
+Write the result with `write_summary_csv` and `write_caber_diag_csv`.
+
+Example
+-------
+    ctx, flow, plan, tol = load_usyext_context("caber_example.toml")
+    traj = integrate_usyext(ctx, flow, plan, tol)
+    write_summary_csv("summary.csv", traj)
 """
 function integrate_usyext(ctx  :: UsyextCtx,
                            flow,
@@ -740,9 +758,17 @@ end
 """
     write_summary_csv(path, traj)
 
-Write USYEXT trajectory to CSV in the standard reference format.
+Write a USYEXT trajectory to CSV (one row per sample strain).
 
 Columns: idx,estrain,t,tWi_ref,Wi,De,E2,etaE1,etaE2,Tr1,Tr2,tau_xx,tau_yy,tau_zz,status
+  estrain  Hencky strain ε;  t  time in units of λ₁,₀;  tWi_ref  unused (always NaN,
+  kept for compatibility with the MATLAB reference files);  Wi = λ₁,₀ ε̇;  De as input;
+  E2  chain stretch E² relative to the equilibrium coil (E² = 1 at rest);
+  etaE1, etaE2  polymer extensional viscosities −(τ_ext − τ_comp)/Wi in units of
+  c k_BT λ₁,₀ (equal for uniaxial flow);  Tr1, Tr2  Trouton ratios (polymer extensional
+  viscosity over 3 η_s);  tau_xx, tau_yy, tau_zz  polymer stress τ/(c k_BT),
+  compressive-positive;  status  "ok" or "terminated".
+Full description: docs/output_reference.md.
 """
 function write_summary_csv(path::AbstractString, traj::Vector{UsyextPoint})
     open(path, "w") do io
@@ -762,16 +788,23 @@ end
 """
     write_caber_diag_csv(path, traj)
 
-Write CaBER-specific diagnostics to CSV, mirroring MATLAB's caber_diag.csv.
+Write the capillary-thinning stress balance at each sample to CSV.
 
 Columns: idx,estrain,t,Wi,De,R,X,N1_p,K_til,capstress,polystress,viscstress
+  R  filament radius R/R₀;  X  end-plate (geometry) factor of the balance;
+  N1_p  polymer first normal stress difference (τ_zz − τ_rr)/(c k_BT), negative in
+  extension;  K_til  polymer-stress prefactor φ U₁ (viscous) or φ U_R (inertial).
 
-Only meaningful for CaBER runs; for constant-Wi runs R/X/N1_p/K_til will be NaN.
+Only meaningful for CaBER runs; for constant-Wi runs R/X/N1_p/K_til are NaN.
 
-Stress decomposition (from 0-D CaBER balance  3·Wi = capstress + polystress):
-  capstress  = ((2X-1)/R)·De
-  polystress = K̃·N1_p
-  viscstress = capstress + polystress  (= 3·Wi from the balance)
+Stress decomposition of the viscocapillary balance 3·Wi = capstress + polystress
+(all three in units of the solvent stress η_s/λ₁,₀ … i.e. as contributions to 3 Wi):
+  capstress  = ((2X−1)/R)·De     capillary pressure driving the thinning
+  polystress = K̃·N1_p           polymer normal stress resisting it (≤ 0)
+  viscstress = capstress + polystress  (= 3·Wi: what the solvent must carry)
+For the inertiocapillary flow the same three columns are written but the balance
+is quadratic in Wi, so viscstress ≠ 3·Wi there.
+Full description: docs/output_reference.md.
 """
 function write_caber_diag_csv(path::AbstractString, traj::Vector{UsyextPoint})
     open(path, "w") do io

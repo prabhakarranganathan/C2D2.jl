@@ -2,28 +2,26 @@
     StyextFlows.jl
 
 Steady homogeneous-flow kinematics and continuation-coordinate maps for the
-steady PAC solver (STYEXT and, since 2026-10-16, planar mixed flows / PMF).
+steady pseudo-arclength continuation (PAC) solver: steady extension (STYEXT)
+and planar mixed flows (PMF, which include simple shear).
 
-Mirrors MATLAB's
-  styext_Wi_from_mu.m / styext_mu_from_Wi.m
-and extends them with a flow-kinematics type.
-
-Flow types
-----------
-  PrincipalExtension(alphas)   — κ = Wi·diag(α₁, α₂, α₃); the classic STYEXT
-                                 flow (uniaxial / biaxial / planar extension).
+Flow types (technical report Ch. 3)
+-----------------------------------
+  PrincipalExtension(alphas)   — κ = Wi·diag(α₁, α₂, α₃); shear-free flows
+                                 (uniaxial α = (−½, −½, 1), biaxial, planar
+                                 α = (1, −1, 0) extension).  TOML `[flow] kind = "styext"`.
   PlanarMixedFlow(r)           — κ = Wi·κ̂(r), κ̂(r) = [1 r 0; −r −1 0; 0 0 0]
-                                 (tech report App. "Planar mixed flows",
-                                 `a:M2CD2-ShrFlow`). r = vorticity/strain-rate
+                                 (report Sec. 3.2.2). r = vorticity/strain-rate
                                  ratio: r = 0 planar extension, r = 1 simple
-                                 shear, r > 1 rotation-dominated.
+                                 shear, r > 1 rotation-dominated.  TOML `[flow] kind = "pmf"`.
 
 Wi convention for PlanarMixedFlow
 ---------------------------------
-`Wi` is the report-appendix Wi: λ₀ times the principal strain rate (the ±1
+`Wi` is the report's Wi: λ₁,₀ times the principal strain rate (the ±1
 eigenvalues of κ̂ are unit). The shear-rate measure γ̇ = √(2 D:D) is
-r-independent and equals 2·Wi/λ₀, so the *conventional shear Weissenberg
-number* λ₀γ̇ is `Wi_shear = 2·Wi`. Both are reported; see `wi_shear`.
+r-independent and equals 2·Wi/λ₁,₀, so the *conventional shear Weissenberg
+number* λ₁,₀γ̇ is `Wi_shear = 2·Wi`. Both are written to the output; see
+`wi_shear` and TOML `[flow] Wi_convention`.
 
 Continuation coordinate μ
 -------------------------
@@ -46,7 +44,7 @@ Public API
   pole_mode_index(flow, theta_p)        -> index p* whose θ sets the pole
   wi_map(flow, mu, Wi_pole)             -> (Wi, dWi/dμ, dWi/dWi_pole)
   mu_from_wi(flow, Wi, Wi_pole)         -> μ
-  wi_shear(Wi)                          -> 2·Wi   (λ₀√(2D:D) for PMF)
+  wi_shear(Wi)                          -> 2·Wi   (λ₁,₀√(2D:D) for PMF)
   Wi_from_mu(mu, Wi_pole), mu_from_Wi(Wi, Wi_pole)   — legacy logistic map
 """
 module StyextFlows
@@ -104,9 +102,8 @@ has_pole(f::PlanarMixedFlow)   = f.r < 1.0
     pole_mode_index(flow, theta_p) -> Int
 
 Index of the mode whose θ_p sets Wi_pole. Extension keeps the historical
-STYEXT choice p* = 1 (bit-identical to the pre-PMF code). PMF uses argmin θ_p
-(the report's θ_min); for monotone spectra (Rouse, Zimm, blob) this is p = 1
-as well.
+STYEXT choice p* = 1. PMF uses argmin θ_p (the report's θ_min); for monotone
+spectra (Rouse, Zimm, blob) this is p = 1 as well.
 """
 pole_mode_index(::PrincipalExtension, theta_p::AbstractVector{Float64}) = 1
 pole_mode_index(::PlanarMixedFlow,    theta_p::AbstractVector{Float64}) = argmin(theta_p)
@@ -167,8 +164,8 @@ end
 """
     wi_shear(Wi) -> 2·Wi
 
-Conventional shear Weissenberg number λ₀γ̇ = λ₀√(2 D:D) for a PlanarMixedFlow
-at report-appendix Wi (r-independent).
+Conventional shear Weissenberg number λ₁,₀γ̇ = λ₁,₀√(2 D:D) for a PlanarMixedFlow
+at the report's Wi (r-independent).
 """
 @inline wi_shear(Wi::Float64) = 2.0 * Wi
 

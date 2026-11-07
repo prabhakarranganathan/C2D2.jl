@@ -8,9 +8,9 @@ from the previous Wi and bisecting the Wi step when Newton fails.
 This complements the PAC manifold builder (`StyextManifold.build_manifold`),
 which places points adaptively along the (Y, μ) curve. The fixed-Wi sweep is
 the natural driver for pole-free flows (planar mixed flow with r ≥ 1, e.g.
-simple shear), where the tech report (App. "Planar mixed flows") proves a
-unique admissible steady state at every Wi, and it is what a Wi-grid
-comparison against reference data needs.
+simple shear), where the technical report (Sec. 3.2.2) proves a unique
+admissible steady state at every Wi, and it is what a Wi-grid comparison
+against reference data needs.
 
 Public API
 ----------
@@ -81,9 +81,17 @@ end
                    include_equilibrium = true, max_bisect = 20,
                    stop_on_fail = true, verbose = false) -> Vector{StyextPoint}
 
-Solve the steady closure state at each Wi in `Wi_values` (sorted ascending,
-report-appendix Wi convention). Starts from equilibrium (X = Q₀², Y = E₀²)
-and warm-starts each Wi from the previous solution.
+Solve the steady closure state at each Wi in `Wi_values` (sorted ascending;
+Wi = λ₁,₀ × principal strain rate, the report's convention, so for simple shear
+Wi = λ₁,₀γ̇/2). Starts from equilibrium (X = Q₀², Y = E₀²) and warm-starts each
+Wi from the previous solution.  `ctx` and `solver_opts` come from
+`load_styext_context`; the `[sweep]` grid of the TOML is `params.Wi_sweep`.
+
+Example
+-------
+    params, ctx, solver_opts, man_opts = load_styext_context("shear_example.toml")
+    traj = sweep_fixed_Wi(ctx, params.Wi_sweep, solver_opts; X_stop = man_opts.X_stop)
+    write_pmf_summary_csv("summary_sweep.csv", traj)
 
 Termination: a point whose Y reaches ctx.Ymax (the max_frac_stretch_sq·E∞²
 cap) ends the sweep; a leg that fails after `max_bisect` bisections ends it
@@ -168,12 +176,14 @@ end
 Planar-mixed-flow / shear summary CSV (one row per point).
 
 Columns
-  idx, E2, Wi, Wi_shear,                       Wi_shear = 2·Wi = λ₀γ̇ (λ₀√(2D:D))
-  eta_p, Psi1, Psi2,                           shear material functions (flow frame)
-  tau_xx, tau_yy, tau_zz, tau_xy,              flow-frame τ/(c kBT), STYEXT sign (−Σ(3fM−I))
+  idx, E2, Wi, Wi_shear,                       Wi = λ₁,₀ × principal strain rate; Wi_shear = 2·Wi = λ₁,₀γ̇
+  eta_p, Psi1, Psi2,                           polymer shear viscosity (units c kBT λ₁,₀) and first/second
+                                               normal-stress coefficients (units c kBT λ₁,₀²), flow frame
+  tau_xx, tau_yy, tau_zz, tau_xy,              flow-frame τ/(c kBT), compressive-positive sign (−Σ(3fM−I))
   tau_11, tau_22, tau_12,                      strain-axes frame (τ_33 = tau_zz)
-  etaE1, etaE2, Tr1, Tr2,                      strain-frame planar extensional viscosities
-  Wi_pole, newton_iters, ds, FY_rel, status
+  etaE1, etaE2, Tr1, Tr2,                      strain-frame planar extensional viscosities and Trouton ratios
+  Wi_pole, newton_iters, ds, FY_rel, status    solver diagnostics ("eq", "FWi-cnv", "FWi-fail", "Y_stop", "X_stop")
+Full description: docs/output_reference.md.
 """
 function write_pmf_summary_csv(path::AbstractString, traj::Vector{StyextPoint})
     open(path, "w") do io
