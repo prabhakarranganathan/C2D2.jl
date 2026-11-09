@@ -15,8 +15,10 @@ The two loaders are
 
 Commented examples of the three flow families are in `julia/examples/inputs/`.
 The physics behind each key is in the technical report
-([10.5281/zenodo.18012677](https://doi.org/10.5281/zenodo.18012677)); section
-numbers below refer to it.
+([10.5281/zenodo.18012676](https://doi.org/10.5281/zenodo.18012676), which
+always resolves to the latest version). Section numbers below refer to
+version 3 of the report
+([10.5281/zenodo.24035542](https://doi.org/10.5281/zenodo.24035542)).
 
 ## Units and notation
 

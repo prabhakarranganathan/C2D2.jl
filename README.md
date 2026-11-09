@@ -1,7 +1,7 @@
 # C2D2 — Conformation- and Concentration-Dependent Drag
 
 [![Software DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.24033584.svg)](https://doi.org/10.5281/zenodo.24033584)
-[![Report DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.18012677.svg)](https://doi.org/10.5281/zenodo.18012677)
+[![Report DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.18012676.svg)](https://doi.org/10.5281/zenodo.18012676)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
 C2D2.jl computes the rheology of dilute and semi-dilute solutions of flexible
@@ -10,7 +10,7 @@ in which the hydrodynamic drag on a chain depends on both the chain's
 *conformation* (how far it is stretched) and the solution's *concentration*
 (how much the chains overlap). The physics and the numerical methods are
 described in the accompanying technical report, archived on Zenodo:
-[10.5281/zenodo.18012677](https://doi.org/10.5281/zenodo.18012677).
+[10.5281/zenodo.18012676](https://doi.org/10.5281/zenodo.18012676).
 
 The code solves three homogeneous flow problems:
 
@@ -270,7 +270,7 @@ docs/
 If you use this software, please cite both:
 
 - the software — this version (v1.1.1) is archived at [10.5281/zenodo.24033584](https://doi.org/10.5281/zenodo.24033584); the concept DOI [10.5281/zenodo.21089959](https://doi.org/10.5281/zenodo.21089959) always resolves to the latest version (metadata in [`CITATION.cff`](CITATION.cff)); and
-- the accompanying technical report — [10.5281/zenodo.18012677](https://doi.org/10.5281/zenodo.18012677).
+- the accompanying technical report — [10.5281/zenodo.18012676](https://doi.org/10.5281/zenodo.18012676).
 
 ## License
 

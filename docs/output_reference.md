@@ -4,7 +4,9 @@ Every run writes plain CSV files with a header row, plus a copy of the input
 TOML. This page lists the columns of each file, their meaning and their
 units. The notation is that of `docs/input_reference.md`: lengths in units of
 the equilibrium coil size E₀, times in units of λ₁,₀ (the equilibrium longest
-relaxation time), stresses in units of c k_BT.
+relaxation time), stresses in units of c k_BT. Section numbers refer to
+version 3 of the technical report
+([10.5281/zenodo.24035542](https://doi.org/10.5281/zenodo.24035542)).
 
 Common conventions:
 

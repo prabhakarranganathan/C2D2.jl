@@ -3,7 +3,8 @@
 
 Chain friction kernel for the C2D2 (conformation- and concentration-dependent
 drag) model.  Physics: technical report Sec. 2.1 "Chain friction"
-(DOI 10.5281/zenodo.18012677).
+(concept DOI 10.5281/zenodo.18012676; section numbers refer to version 3,
+10.5281/zenodo.24035542).
 
 Implements:
   - the Kirkwood–Riseman draining function α(h*_K, N) of an ideal random-walk

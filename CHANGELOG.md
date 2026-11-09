@@ -4,6 +4,20 @@ All notable changes to C2D2.jl are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.0.0/) and versions follow
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+
+- Documentation: the technical report is now linked by its concept DOI,
+  [10.5281/zenodo.18012676](https://doi.org/10.5281/zenodo.18012676), which
+  always resolves to the latest version, instead of the version-1 record
+  (10.5281/zenodo.18012677). Affects the README badge and links,
+  `CITATION.cff` (`preferred-citation` DOI, URL and year 2026),
+  `docs/input_reference.md` and the `Drag.jl` header. Report section numbers
+  cited in the docs and docstrings refer to report version 3
+  ([10.5281/zenodo.24035542](https://doi.org/10.5281/zenodo.24035542)); they
+  were checked against it and none needed changing.
+
 ## [1.1.1] — 2026-11-07
 
 Documentation for human readers, plus one keyword alias. No computed value,
