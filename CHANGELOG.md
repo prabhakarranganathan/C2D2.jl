@@ -12,7 +12,8 @@ All notable changes to C2D2.jl are documented here. The format follows
   [10.5281/zenodo.18012676](https://doi.org/10.5281/zenodo.18012676), which
   always resolves to the latest version, instead of the version-1 record
   (10.5281/zenodo.18012677). Affects the README badge and links,
-  `CITATION.cff` (`preferred-citation` DOI, URL and year 2026),
+  `CITATION.cff` (`preferred-citation` DOI, URL, year 2026, and title
+  updated to the version-3 title),
   `docs/input_reference.md` and the `Drag.jl` header. Report section numbers
   cited in the docs and docstrings refer to report version 3
   ([10.5281/zenodo.24035542](https://doi.org/10.5281/zenodo.24035542)); they

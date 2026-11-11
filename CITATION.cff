@@ -37,7 +37,7 @@ keywords:
   - Julia
 preferred-citation:
   type: report
-  title: "Technical Note (draft) on the Conformation- and Concentration-Dependent Drag (C2D2) model for unentangled solutions of flexible polymers and numerical algorithms for rheological properties in steady and unsteady flows"
+  title: "Numerical algorithms for prediction of rheological properties of unentangled solutions of flexible polymers in steady and unsteady flows using the Conformation- and Concentration-Dependent Drag (C2D2) model"
   authors:
     - family-names: Ranganathan
       given-names: Prabhakar
