@@ -9,7 +9,8 @@ thinning).
 Algorithm
 ---------
 Integrates the diagonal modal conformation tensors M ∈ ℝ^{Nm×3} (columns xx, yy,
-zz) forward in Hencky strain ε, or in dimensionless time t/λ₁,₀ when Wi is small
+zz) forward in Hencky strain ε, or in dimensionless time t/t_flow when Wi is small
+(t_flow = λ₁,₀/De, the flow time: dt/dε = De/Wi)
 (`[integration] independent = "auto"` switches between the two).
 
 Each accepted step uses an embedded ETD1/ETD2 pair:
@@ -118,7 +119,8 @@ i_comp   : index of primary compressive axis (argmin alphas)
 Nm       : number of modes
 E0       : equilibrium coil size √(Q₀² Nm)  — normalization for drag/spectrum LUT
 Ymax     : max_frac_stretch_sq · E∞²         — termination threshold
-lambda0  : λ₁,₀, the equilibrium longest relaxation time (the time unit)
+lambda0  : λ₁,₀, the equilibrium longest relaxation time (unit of the relaxation
+           rates; the time t is in units of the flow time λ₁,₀/De)
 etas     : solvent viscosity η_s
 ckBT     : c · k_B · T (the stress unit)
 """
@@ -761,7 +763,8 @@ end
 Write a USYEXT trajectory to CSV (one row per sample strain).
 
 Columns: idx,estrain,t,tWi_ref,Wi,De,E2,etaE1,etaE2,Tr1,Tr2,tau_xx,tau_yy,tau_zz,status
-  estrain  Hencky strain ε;  t  time in units of λ₁,₀;  tWi_ref  unused (always NaN,
+  estrain  Hencky strain ε;  t  time in units of the flow time λ₁,₀/De
+  (t_v for "caber", t_R for "caber_inertial");  tWi_ref  unused (always NaN,
   kept for compatibility with the MATLAB reference files);  Wi = λ₁,₀ ε̇;  De as input;
   E2  chain stretch E² relative to the equilibrium coil (E² = 1 at rest);
   etaE1, etaE2  polymer extensional viscosities −(τ_ext − τ_comp)/Wi in units of

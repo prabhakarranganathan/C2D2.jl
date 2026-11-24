@@ -6,6 +6,17 @@ All notable changes to C2D2.jl are documented here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- Documentation: the time `t` of unsteady runs (`usyext_summary.csv`, the
+  `[integration]` time keys) is in units of the flow time λ₁,₀/De
+  (the viscocapillary time t_v for `"caber"`, the Rayleigh time t_R for
+  `"caber_inertial"`), not λ₁,₀ as the docs and docstrings said. The
+  integrator advances time with dt/dε = De/Wi; to convert t to
+  seconds multiply by λ₁,₀/De. Code unchanged. Affects
+  `docs/output_reference.md`, `docs/input_reference.md`,
+  `UsyextIntegrator.jl` and `UsyextFlows.jl`.
+
 ### Changed
 
 - Documentation: the technical report is now linked by its concept DOI,

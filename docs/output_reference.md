@@ -3,8 +3,9 @@
 Every run writes plain CSV files with a header row, plus a copy of the input
 TOML. This page lists the columns of each file, their meaning and their
 units. The notation is that of `docs/input_reference.md`: lengths in units of
-the equilibrium coil size E₀, times in units of λ₁,₀ (the equilibrium longest
-relaxation time), stresses in units of c k_BT. Section numbers refer to
+the equilibrium coil size E₀, relaxation times and Wi in units of λ₁,₀ (the
+equilibrium longest relaxation time; the time `t` of unsteady runs is in
+units of the flow time λ₁,₀/De, see below), stresses in units of c k_BT. Section numbers refer to
 version 3 of the technical report
 ([10.5281/zenodo.24035542](https://doi.org/10.5281/zenodo.24035542)).
 
@@ -55,7 +56,7 @@ the `[output]` schedule.
 |---|---|
 | `idx` | row number |
 | `estrain` | Hencky strain ε = ln(L/L₀); for capillary thinning R/R₀ = exp(−ε/2) |
-| `t` | time in units of λ₁,₀ |
+| `t` | time in units of the flow time λ₁,₀/De, not λ₁,₀ (the integrator advances dt/dε = De/Wi): the viscocapillary time t_v = η_s R₀/γ for `"caber"`, the Rayleigh time t_R for `"caber_inertial"`. Multiply by λ₁,₀/De to get seconds; t/De is the time in units of λ₁,₀ |
 | `tWi_ref` | not used (always NaN; kept for compatibility with the MATLAB reference files) |
 | `Wi` | Weissenberg number λ₁,₀ ε̇ at this instant (set by the flow protocol; for capillary thinning it follows from the stress balance) |
 | `De` | the Deborah number of the run, as input |

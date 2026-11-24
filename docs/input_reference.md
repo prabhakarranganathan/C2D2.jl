@@ -23,9 +23,10 @@ version 3 of the report
 ## Units and notation
 
 All inputs are dimensionless. The length unit is the equilibrium coil size
-E₀, the time unit is λ₁,₀ (the longest relaxation time of a chain at rest, at
+E₀, relaxation times and Wi are in units of λ₁,₀ (the longest relaxation time of a chain at rest, at
 the given concentration), and the stress unit is c k_BT (chain number density
-times thermal energy). Symbols:
+times thermal energy). In unsteady runs the time t (in the output and in the
+`[integration]` time keys) is in units of the flow time λ₁,₀/De, not λ₁,₀. Symbols:
 
 | symbol | meaning |
 |---|---|
@@ -175,7 +176,7 @@ the output goes.
 
 | key | meaning | default |
 |---|---|---|
-| `independent` | integration variable: `"strain"` Hencky strain, `"time"` time in units of λ₁,₀, `"auto"` strain while Wi is large and time while it is small | `"strain"` |
+| `independent` | integration variable: `"strain"` Hencky strain, `"time"` time in units of the flow time λ₁,₀/De, `"auto"` strain while Wi is large and time while it is small | `"strain"` |
 | `strain_max` | final Hencky strain | `6.0` |
 | `Wi_min_strain_independent` | Wi below which `"auto"` steps in time (with a factor-2 hysteresis band) | `0.0` |
 | `dstrain_init`, `dt_init` | first trial step in strain and in time | `1e-3`, `1e-3` |

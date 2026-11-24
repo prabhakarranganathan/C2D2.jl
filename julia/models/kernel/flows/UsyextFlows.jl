@@ -14,8 +14,9 @@ Three protocols are supported (TOML `[flow] kind`):
   CaberInertialFlow   — "caber_inertial": the same balance in the inertiocapillary
                         limit Oh ≪ 1, with the Ohnesorge number as input.
 
-Time unit: λ₁,₀.  The Deborah number De compares λ₁,₀ with the macroscopic flow
-time: the viscocapillary time t_v = η_s R₀/γ for "caber" and the Rayleigh time
+Time unit: the macroscopic flow time λ₁,₀/De (the integrator advances
+dt/dε = De/Wi); Wi and the relaxation rates are in units of λ₁,₀.  The Deborah
+number De compares λ₁,₀ with the flow time: the viscocapillary time t_v = η_s R₀/γ for "caber" and the Rayleigh time
 t_R = √(ρR₀³/γ) for "caber_inertial" (R₀ the initial filament radius, γ the
 surface tension).
 
